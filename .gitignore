@@ -1,0 +1,10 @@
+.tools/
+.downloads/
+.packages/
+vendor/
+build/
+dist/
+**/bin/
+**/obj/
+.vs/
+*.user
