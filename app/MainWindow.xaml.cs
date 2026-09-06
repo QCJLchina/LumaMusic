@@ -46,6 +46,9 @@ public sealed partial class MainWindow : Window
         InitializeComponent();ExtendsContentIntoTitleBar=true;SetTitleBar(TitleBar);
         AppWindow.Resize(new SizeInt32(1320,860));AppWindow.Title="Luma Music";
         var icon=System.IO.Path.Combine(AppContext.BaseDirectory,"Assets","Luma.ico");if(File.Exists(icon))AppWindow.SetIcon(icon);
+        // 此版本 AppWindow 无 PreferredMinimum 尺寸 API：用 Changed 事件把窗口宽高钳制在布局安全值（1000x660）以下，
+// 底部条固定列（260+210+控件）与头部横幅在更窄宽度会溢出裁切
+AppWindow.Changed+=(w,a)=>{if(a.DidSizeChange&&(w.Size.Width<1000||w.Size.Height<660))w.Resize(new Windows.Graphics.SizeInt32{Width=Math.Max(w.Size.Width,1000),Height=Math.Max(w.Size.Height,660)});};
         if(AppWindow.TitleBar!=null){AppWindow.TitleBar.ButtonBackgroundColor=Colors.Transparent;AppWindow.TitleBar.ButtonInactiveBackgroundColor=Colors.Transparent;AppWindow.TitleBar.ButtonForegroundColor=Color.FromArgb(255,210,225,210);}
         TrackList.ItemsSource=visible;QueueList.ItemsSource=queue;
         Root.Loaded+=Loaded;Root.KeyDown+=KeyDown;
@@ -113,7 +116,16 @@ public sealed partial class MainWindow : Window
         var c=palette[0];
         var adjusted=LightTheme?Color.FromArgb(255,(byte)(c.R*52/100+28),(byte)(c.G*52/100+28),(byte)(c.B*52/100+28)):Color.FromArgb(255,(byte)(c.R*55/100+118),(byte)(c.G*55/100+118),(byte)(c.B*55/100+118));
         brush.Color=adjusted;
+        // 侧栏自取色：轻沾封面主色，玻璃与氛围一体，不再是突兀的白框/黑框。
+        if(dict["SidebarBackground"] is AcrylicBrush side){
+            var tint=LightTheme?Mix(c,Colors.White,0.74):Mix(c,Colors.Black,0.68);
+            side.TintColor=tint;side.FallbackColor=LightTheme?Mix(c,Colors.White,0.88):Mix(c,Colors.Black,0.85);
+        }
+        if(LightTheme&&dict["HeroBackground"] is AcrylicBrush hero){
+            hero.TintColor=Mix(c,Colors.White,0.8);hero.FallbackColor=Mix(c,Colors.White,0.9);
+        }
     }
+    static Color Mix(Color a,Color b,double t)=>Color.FromArgb(a.A,(byte)Math.Round(a.R+(b.R-a.R)*t),(byte)Math.Round(a.G+(b.G-a.G)*t),(byte)Math.Round(a.B+(b.B-a.B)*t));
     bool LightTheme=>Root.ActualTheme==ElementTheme.Light;
     Color OnAmbient(byte a)=>LightTheme?Color.FromArgb(a,26,32,29):Color.FromArgb(a,255,255,255);
     SolidColorBrush InactiveLyric()=>LightTheme?Brush(150,45,55,50):Brush(120,194,210,193);
