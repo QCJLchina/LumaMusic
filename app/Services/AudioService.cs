@@ -23,14 +23,21 @@ public sealed class AudioService : IDisposable
     {
         await serial.WaitAsync();Busy=true;
         try{
-            if(profile.DsdMode==1&&!profile.DopConfirmed&&track.Format is "DSF" or "DFF" or "ISO")throw new InvalidOperationException("请先确认这台 DAC 支持 DoP。");
+            bool isDsd=track.Format is "DSF" or "DFF" or "ISO";
+            if(profile.DsdMode==1&&!profile.DopConfirmed&&isDsd)throw new InvalidOperationException("请先确认这台 DAC 支持 DoP。");
             FlexAsioConfig.LastWarning="";
+            // FlexASIO 是通用 ASIO 壳，做不了原生 DSD：老档案若还留着该组合，自动降级（已确认 DoP 则用 DoP，否则转 PCM）
+            int dsdMode=profile.DsdMode;
+            if(device.Name==AsioSetup.DriverName&&dsdMode==2&&isDsd){
+                dsdMode=profile.DopConfirmed?1:0;
+                FlexAsioConfig.LastWarning=dsdMode==1?"FlexASIO 不支持原生 DSD，已自动改用 DoP 透传。":"FlexASIO 不支持原生 DSD，已自动转为 PCM 输出。";
+            }
             async Task Start(){
-                await Task.Run(()=>{if(luma_open(track.Path,track.Subsong,profile.Backend,device.Index,profile.DsdMode,profile.PcmRate,profile.ForceRate,profile.Downmix?1:0,profile.Mapping,volume,position)==0)throw new InvalidOperationException(Error());});
+                await Task.Run(()=>{if(luma_open(track.Path,track.Subsong,profile.Backend,device.Index,dsdMode,profile.PcmRate,profile.ForceRate,profile.Downmix?1:0,profile.Mapping,volume,position)==0)throw new InvalidOperationException(Error());});
             }
             if(profile.Backend==2&&device.Name==AsioSetup.DriverName)
             {
-                bool dop=track.Format is "DSF" or "DFF" or "ISO"&&profile.DsdMode==1;
+                bool dop=isDsd&&dsdMode==1;
                 FlexAsioTarget(profile,dop);
                 try{await Start();}
                 catch(InvalidOperationException)when(FlexAsioConfig.Targeted){

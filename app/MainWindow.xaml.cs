@@ -26,6 +26,9 @@ public sealed partial class MainWindow : Window
     readonly Preferences prefs=AppPaths.Load();AudioService? audio;
     readonly ObservableCollection<Track> visible=[];readonly ObservableCollection<Track> queue=[];
     List<Track> tracks=[];List<AudioDevice> devices=[];Track? current;
+    ContentDialog? activeDialog;
+    // WinRT 同一时刻只允许一个 ContentDialog：开新框前自动关掉旧的，否则 COMException 直接闪退
+    async Task<ContentDialogResult> Show(ContentDialog d){try{activeDialog?.Hide();}catch{/**/}activeDialog=d;try{return await d.ShowAsync();}finally{if(activeDialog==d)activeDialog=null;}}
     readonly DispatcherTimer timer=new(){Interval=TimeSpan.FromMilliseconds(150)};
     readonly DispatcherTimer seekTimer=new(){Interval=TimeSpan.FromMilliseconds(350)};
     readonly DispatcherTimer searchTimer=new(){Interval=TimeSpan.FromMilliseconds(220)};
@@ -93,10 +96,10 @@ public sealed partial class MainWindow : Window
     void AlbumsTab_Click(object sender,RoutedEventArgs e){showAlbums=true;Filter();}
     void Search_Changed(AutoSuggestBox sender,AutoSuggestBoxTextChangedEventArgs args){searchTimer.Stop();searchTimer.Start();}
     void Album_ItemClick(object sender,ItemClickEventArgs e){if(e.ClickedItem is Track t){albumFilter=t.AlbumKey;showAlbums=false;PageTitle.Text=t.Album;Filter();}}
-    async void ArtistsTab_Click(object sender,RoutedEventArgs e){var list=new ListView{ItemsSource=tracks.Select(t=>t.Artist).Distinct().Order().ToList(),SelectionMode=ListViewSelectionMode.Single,MaxHeight=380};var dialog=Dialog("选择艺术家",list,"查看歌曲");if(await dialog.ShowAsync()==ContentDialogResult.Primary&&list.SelectedItem is string name){artistFilter=name;albumFilter=null;showAlbums=false;PageTitle.Text=name;Filter();}}
+    async void ArtistsTab_Click(object sender,RoutedEventArgs e){var list=new ListView{ItemsSource=tracks.Select(t=>t.Artist).Distinct().Order().ToList(),SelectionMode=ListViewSelectionMode.Single,MaxHeight=380};var dialog=Dialog("选择艺术家",list,"查看歌曲");if(await Show(dialog)==ContentDialogResult.Primary&&list.SelectedItem is string name){artistFilter=name;albumFilter=null;showAlbums=false;PageTitle.Text=name;Filter();}}
     ContentDialog Dialog(string title,object content,string primary="确定")=>new(){Title=title,Content=content,PrimaryButtonText=primary,CloseButtonText="取消",DefaultButton=ContentDialogButton.Primary,XamlRoot=Root.XamlRoot,RequestedTheme=ElementTheme.Dark};
     void RefreshPlaylists(){PlaylistNav.Children.Clear();foreach(var p in library.Playlists()){var b=new Button{Content="♫  "+p.Name,Style=(Style)Application.Current.Resources["NavButton"],Tag=p};b.Click+=(_,_)=>{playlistFilter=p.Id;favoritesOnly=false;albumFilter=null;artistFilter=null;PageTitle.Text=p.Name;ShowLibrary();Filter();};PlaylistNav.Children.Add(b);}}
-    async void NewPlaylist_Click(object sender,RoutedEventArgs e){var text=new TextBox{PlaceholderText="为这份心情取个名字",MaxLength=60};if(await Dialog("新建播放列表",text,"创建").ShowAsync()==ContentDialogResult.Primary&&!string.IsNullOrWhiteSpace(text.Text)){library.CreatePlaylist(text.Text.Trim());RefreshPlaylists();}}
+    async void NewPlaylist_Click(object sender,RoutedEventArgs e){var text=new TextBox{PlaceholderText="为这份心情取个名字",MaxLength=60};if(await Show(Dialog("新建播放列表",text,"创建"))==ContentDialogResult.Primary&&!string.IsNullOrWhiteSpace(text.Text)){library.CreatePlaylist(text.Text.Trim());RefreshPlaylists();}}
     async void ImportFolder_Click(object sender,RoutedEventArgs e){var picker=new FolderPicker();WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));picker.FileTypeFilter.Add("*");var folder=await picker.PickSingleFolderAsync();if(folder!=null){if(!prefs.Roots.Contains(folder.Path))prefs.Roots.Add(folder.Path);AppPaths.Save(prefs);await Import([folder.Path]);}}
     async Task Import(IEnumerable<string> paths){if(scanCancellation!=null){Toast("正在扫描音乐，请稍候");return;}scanCancellation=new();SetBusy(true);try{var count=await library.Import(paths,new Progress<string>(s=>{Notice.Title="正在整理音乐库";Notice.Message=s;Notice.IsOpen=true;}),scanCancellation.Token);tracks=await Task.Run(library.Load);Filter();Toast("音乐库已更新",$"新增或更新 {count} 首歌曲");}catch(OperationCanceledException){}catch(Exception ex){Toast("导入未完成",ex.Message,true);}finally{scanCancellation?.Dispose();scanCancellation=null;SetBusy(false);}}
     void Root_DragOver(object sender,DragEventArgs e){if(e.DataView.Contains(StandardDataFormats.StorageItems)){e.AcceptedOperation=DataPackageOperation.Copy;e.DragUIOverride.Caption="添加到 Luma 音乐库";}}
@@ -118,7 +121,7 @@ public sealed partial class MainWindow : Window
             PlayIcon.Glyph="\uE769";SetBusy(false);await ShowTrack(track);AppPaths.Save(prefs);
         }catch(Exception ex){SetBusy(false);PlayIcon.Glyph="\uE768";Toast("暂时无法播放",ex.Message,true);
             if(!closing){var content=new TextBlock{Text=ex.Message+"\n\n可以使用 PCM 兼容输出；必要时将多声道混成立体声。此选择会保存到当前设备。",TextWrapping=TextWrapping.Wrap,MaxWidth=420};var dlg=Dialog("输出格式需要调整",content,"使用 PCM 兼容播放");dlg.SecondaryButtonText="打开输出设置";
-                var choice=await dlg.ShowAsync();
+                var choice=await Show(dlg);
                 if(choice==ContentDialogResult.Primary&&Device!=null){var p=prefs.Profile;p.DsdMode=0;p.PcmRate=176400;p.ForceRate=Device.Rate>0?Device.Rate:44100;p.Downmix=track.Channels>(Device.Channels>0?Device.Channels:2);AppPaths.Save(prefs);DispatcherQueue.TryEnqueue(async()=>await Play(track,position));}
                 else if(choice==ContentDialogResult.Secondary)DispatcherQueue.TryEnqueue(async()=>await Settings());
             }
@@ -228,6 +231,7 @@ public sealed partial class MainWindow : Window
             int backend=d.Backend==2?2:Math.Clamp(modeBox.SelectedIndex,0,1);
             if(dsdBox.SelectedIndex==1&&dop.IsChecked!=true){args.Cancel=true;hint.Text="启用 DoP 前需要确认设备支持。";return;}
             if(dsdBox.SelectedIndex==2&&d.Backend!=2){args.Cancel=true;hint.Text="原生 DSD 需要选择 ASIO 驱动。";return;}
+            if(dsdBox.SelectedIndex==2&&d.Name==AsioSetup.DriverName){args.Cancel=true;hint.Text="FlexASIO 是通用驱动，无法原生 DSD；请改用 DoP 透传（原生 DSD 需 DAC 厂商 ASIO 驱动）。";return;}
             if(dsdBox.SelectedIndex==1&&backend==0){args.Cancel=true;hint.Text="DoP 不能通过共享模式播放。";return;}
             try{var map=mapping.Text.Split(',',StringSplitOptions.TrimEntries).Select(int.Parse).Select(i=>i-1).ToArray();if(map.Length!=8||map.Any(i=>i<0)||map.Distinct().Count()!=8)throw new FormatException();
                 string atId="",atName="";
@@ -236,7 +240,7 @@ public sealed partial class MainWindow : Window
                 prefs.Online=onlineCheck.IsOn;prefs.ReducedMotion=motion.IsOn;Ambient.Reduced=prefs.ReducedMotion;AppPaths.Save(prefs);
             }catch{args.Cancel=true;hint.Text="请输入 8 个不同的正整数作为通道映射。";}
         };
-        if(await dialog.ShowAsync()==ContentDialogResult.Primary){
+        if(await Show(dialog)==ContentDialogResult.Primary){
             bool resume=lastState.Playing;double position=lastState.Position;
             if(current!=null&&lastState.Duration>0){
                 await Play(current,position);
@@ -287,7 +291,7 @@ public sealed partial class MainWindow : Window
             }
         };
         _=DoSearch();
-        await dialog.ShowAsync();
+        await Show(dialog);
     }
     async Task FindCover(){
         if(current==null)return;
@@ -329,11 +333,11 @@ public sealed partial class MainWindow : Window
             }
         };
         _=DoSearch();
-        await dialog.ShowAsync();
+        await Show(dialog);
     }
     async Task<StorageFile?> Pick(params string[] extensions){var p=new FileOpenPicker();WinRT.Interop.InitializeWithWindow.Initialize(p,WinRT.Interop.WindowNative.GetWindowHandle(this));foreach(var ext in extensions)p.FileTypeFilter.Add(ext);return await p.PickSingleFileAsync();}
     async Task PickCover(){if(current==null)return;var t=current;var f=await Pick(".jpg",".jpeg",".png",".webp");if(f==null)return;t.Cover=f.Path;library.Save(t);if(current?.Id==t.Id)await SetCover(f.Path);}
     async Task PickLyrics(){if(current==null)return;var t=current;var f=await Pick(".lrc",".txt");if(f==null)return;var text=await File.ReadAllTextAsync(f.Path);library.SaveLyrics(t.Id,text);if(current?.Id==t.Id){lyricOffset=0;DisplayLyrics(text);}}
-    async Task AdjustLyrics(){if(current==null)return;var box=new NumberBox{Header="时间偏移（秒，正数让歌词提前）",Value=lyricOffset,SmallChange=.1,SpinButtonPlacementMode=NumberBoxSpinButtonPlacementMode.Compact,Minimum=-60,Maximum=60};if(await Dialog("歌词同步",box).ShowAsync()==ContentDialogResult.Primary&&double.IsFinite(box.Value)){lyricOffset=box.Value;library.SaveLyrics(current.Id,rawLyrics,lyricOffset);lyricIndex=-2;}}
+    async Task AdjustLyrics(){if(current==null)return;var box=new NumberBox{Header="时间偏移（秒，正数让歌词提前）",Value=lyricOffset,SmallChange=.1,SpinButtonPlacementMode=NumberBoxSpinButtonPlacementMode.Compact,Minimum=-60,Maximum=60};if(await Show(Dialog("歌词同步",box))==ContentDialogResult.Primary&&double.IsFinite(box.Value)){lyricOffset=box.Value;library.SaveLyrics(current.Id,rawLyrics,lyricOffset);lyricIndex=-2;}}
     void KeyDown(object sender,KeyRoutedEventArgs e){if(e.OriginalSource is TextBox or PasswordBox or Slider or ComboBox)return;if(e.Key==VirtualKey.Space){e.Handled=true;PlayPause_Click(sender,new());}else if(e.Key==VirtualKey.Escape){QueuePanel.Visibility=Visibility.Collapsed;if(nowVisible)ShowLibrary();}}
 }
