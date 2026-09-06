@@ -29,6 +29,7 @@
   <ItemGroup>
     <Content Include="../build/native-bin/*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../build/native-bin/LumaDsd.exe" Link="LumaDsd.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../vendor/flexasio/FlexASIOSetup.exe" Link="FlexASIOSetup.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <!-- unpackaged 发布时应用自身的 .pri 不会进 publish 目录，缺了它运行时 XAML 解析直接失败 -->
   <Target Name="CopyAppPriToPublish" AfterTargets="Publish">

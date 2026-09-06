@@ -9,6 +9,7 @@ WinUI 3 无损音乐播放器：C#/XAML 前端 + C++/BASS 原生音频引擎（`
 - `tests/` — `native_tests.cpp`（CMake 目标 `LumaNativeTests`）、`audio_smoke.py`（真实解码/输出冒烟测试，样本为自生成的数字静音）
 - `scripts/` — `bootstrap.py`（下载 pinned 依赖）、`prepare_native.py`（vendor/sacd → build/sacd 打补丁）、`build-native.ps1`、`build.ps1`、`run-dev.ps1`
 - `vendor/` `build/` `.tools/` `.downloads/` `.packages/` `dist/` — 全部可由脚本重建，已在 .gitignore 中
+- FlexASIO 通用 ASIO 驱动安装器由 `bootstrap.py` 按 pinned 版本下载到 `vendor/flexasio/`，经 csproj Content 条目随应用发布包分发（开箱 ASIO 独占，见 `app/Services/AsioSetup.cs`）
 
 ## 环境引导（fresh clone 后）
 

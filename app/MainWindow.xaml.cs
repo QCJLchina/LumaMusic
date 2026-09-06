@@ -181,6 +181,9 @@ public sealed partial class MainWindow : Window
         if(audio==null)return;if(audio.Busy){Toast("正在切换音频，请稍候");return;}devices=audio.Devices();
         var deviceBox=new ComboBox{Header="输出设备",ItemsSource=devices,SelectedItem=Device??devices.FirstOrDefault(),HorizontalAlignment=HorizontalAlignment.Stretch};
         var modeBox=new ComboBox{Header="输出方式",ItemsSource=new[]{"WASAPI 共享","WASAPI 独占","ASIO"},SelectedIndex=prefs.Profile.Backend,HorizontalAlignment=HorizontalAlignment.Stretch};
+        // 开箱即用的 ASIO：系统无任何 ASIO 驱动时，提供随包分发的 FlexASIO 一键安装（GPL，见 THIRD-PARTY-NOTICES.md）
+        var asioHint=new TextBlock{FontSize=11,TextWrapping=TextWrapping.Wrap,Foreground=Brush(200,172,194,176),Visibility=Visibility.Collapsed};
+        var asioInstall=new Button{Content="一键安装 FlexASIO 通用驱动（WASAPI 独占，需管理员确认）",HorizontalAlignment=HorizontalAlignment.Left,Visibility=Visibility.Collapsed};
         var dsdBox=new ComboBox{Header="DSD 播放方式",ItemsSource=new[]{"DSD 转 PCM","DoP 透传","ASIO 原生 DSD","播放前选择"},SelectedIndex=prefs.Profile.DsdMode,HorizontalAlignment=HorizontalAlignment.Stretch};
         var dop=new CheckBox{Content="我已确认此 DAC 支持 DoP",IsChecked=prefs.Profile.DopConfirmed};
         int[] rates=[0,44100,48000,88200,96000,176400,192000,352800,384000];var rate=new ComboBox{Header="PCM 输出采样率",ItemsSource=rates.Select(r=>r==0?"跟随音源":$"{r/1000d:0.#} kHz").ToList(),SelectedIndex=Math.Max(0,Array.IndexOf(rates,prefs.Profile.ForceRate)),HorizontalAlignment=HorizontalAlignment.Stretch};
@@ -192,7 +195,21 @@ public sealed partial class MainWindow : Window
         var scan=new Button{Content="重新扫描已添加的音乐文件夹"};scan.Click+=async(_,_)=>await Import(prefs.Roots);
         void LoadProfile(AudioDevice d){var key=$"{d.Backend}:{d.Id}";var p=prefs.Profiles.TryGetValue(key,out var profile)?profile:new DeviceProfile{Backend=d.Backend};modeBox.SelectedIndex=p.Backend;dsdBox.SelectedIndex=p.DsdMode;dop.IsChecked=p.DopConfirmed;downmix.IsChecked=p.Downmix;rate.SelectedIndex=Math.Max(0,Array.IndexOf(rates,p.ForceRate));mapping.Text=string.Join(", ",p.Mapping.Select(i=>i+1));}
         deviceBox.SelectionChanged+=(_,_)=>{if(deviceBox.SelectedItem is AudioDevice d)LoadProfile(d);};
-        var panel=new StackPanel{Spacing=15,Width=470};foreach(var el in new UIElement[]{deviceBox,modeBox,dsdBox,dop,rate,downmix,mapping,hint,onlineCheck,motion,scan})panel.Children.Add(el);
+        void RefreshAsioState(){bool show=modeBox.SelectedIndex==2&&!devices.Any(d=>d.Backend==2);asioHint.Text=show?"未检测到系统中的 ASIO 驱动。可一键安装随应用附带的 FlexASIO 通用驱动（GPL 开源），安装后即以 ASIO 独占方式输出。":"";asioHint.Visibility=asioInstall.Visibility=show?Visibility.Visible:Visibility.Collapsed;}
+        modeBox.SelectionChanged+=(_,_)=>RefreshAsioState();
+        asioInstall.Click+=async(_,_)=>{
+            asioInstall.IsEnabled=false;asioHint.Text="正在安装 FlexASIO 驱动…请在弹出的管理员授权窗口选择“是”。";
+            try{
+                var (ok,err)=await AsioSetup.InstallAsync();
+                if(!ok){asioHint.Text=err;return;}
+                devices=audio.Devices();deviceBox.ItemsSource=devices;
+                if(devices.FirstOrDefault(d=>d.Backend==2) is AudioDevice flex){deviceBox.SelectedItem=flex;Toast("FlexASIO 驱动已安装","已自动选中，输出方式为 ASIO");}
+                RefreshAsioState();
+            }catch(Exception ex){asioHint.Text="安装失败："+ex.Message;AppPaths.Log("AsioSetup UI: "+ex.Message);}
+            finally{asioInstall.IsEnabled=true;}
+        };
+        RefreshAsioState();
+        var panel=new StackPanel{Spacing=15,Width=470};foreach(var el in new UIElement[]{deviceBox,modeBox,asioHint,asioInstall,dsdBox,dop,rate,downmix,mapping,hint,onlineCheck,motion,scan})panel.Children.Add(el);
         var dialog=Dialog("播放设置",new ScrollViewer{Content=panel,MaxHeight=530},"保存设置");
         dialog.PrimaryButtonClick+=(_,args)=>{
             if(deviceBox.SelectedItem is not AudioDevice d){args.Cancel=true;hint.Text="请选择音频设备。";return;}

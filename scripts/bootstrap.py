@@ -1,10 +1,10 @@
 """Fetch pinned, upstream build dependencies into this checkout only."""
-import concurrent.futures, hashlib, json, pathlib, urllib.request, zipfile, time
+import concurrent.futures, hashlib, json, pathlib, shutil, urllib.request, zipfile, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DOWNLOADS = ROOT / '.downloads'
 DOWNLOADS.mkdir(parents=True, exist_ok=True)
 
-def fetch(url, name, destination=None, sha512=None):
+def fetch(url, name, destination=None, sha512=None, copy=None):
     target = DOWNLOADS / name
     if not target.exists():
         print('Downloading ' + name, flush=True)
@@ -28,6 +28,10 @@ def fetch(url, name, destination=None, sha512=None):
                 resolved = (folder / info.filename).resolve()
                 if not resolved.is_relative_to(folder.resolve()): raise RuntimeError('Unsafe ZIP path')
             archive.extractall(folder)
+    if copy:
+        copied = ROOT / copy
+        copied.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(target, copied)
     print('Ready ' + name, flush=True)
     return target
 
@@ -45,6 +49,7 @@ if __name__ == '__main__':
         ('https://www.un4seen.com/files/basswv24.zip','basswv24.zip','vendor/basswv'),
         ('https://www.un4seen.com/files/bassmix24.zip','bassmix24.zip','vendor/bassmix'),
         ('https://codeload.github.com/xbmc/audiodecoder.sacd/zip/refs/heads/Piers','sacd.zip','vendor/sacd'),
+        ('https://github.com/dechamps/FlexASIO/releases/download/flexasio-1.10b/FlexASIO-1.10b.exe','FlexASIO-1.10b.exe',None,'bd2244e2454fc1bcf5115ef265f567ce6691207630db5003c5ce0d230eb81830dc966ef712ff93ed9ec99e16222f410506cbf1f54adfc71ef7fb0df3441c5dde','vendor/flexasio/FlexASIOSetup.exe'),
     ]
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
         futures = [pool.submit(fetch, *job) for job in jobs]
