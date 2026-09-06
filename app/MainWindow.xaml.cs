@@ -103,6 +103,13 @@ AppWindow.Changed+=(w,a)=>{if(a.DidSizeChange&&(w.Size.Width<1000||w.Size.Height
         bool light=Root.ActualTheme==ElementTheme.Light;
         if(AppWindow.TitleBar!=null){AppWindow.TitleBar.ButtonForegroundColor=light?Color.FromArgb(255,40,48,44):Color.FromArgb(255,210,225,210);AppWindow.TitleBar.ButtonInactiveForegroundColor=light?Color.FromArgb(255,140,150,146):Color.FromArgb(255,150,165,155);}
         ApplyAccent(lastPalette);
+        RefreshLyricColors();
+    }
+    // 主题切换即时刷新歌词配色（旧实现只在歌词行变化时逐行改色，切主题后旧行残留旧色）。
+    void RefreshLyricColors(){
+        if(lyricButtons.Count==0)return;
+        for(int i=0;i<lyricButtons.Count;i++)((TextBlock)lyricButtons[i].Content).Foreground=i==lyricIndex?ActiveLyric():InactiveLyric();
+        LyricsPlaceholder.Foreground=InactiveLyric();
     }
     Color[] lastPalette=[];
     static readonly (string Key,byte Alpha)[] SliderAccentBrushes={("SliderThumbBackground",255),("SliderThumbBackgroundPointerOver",230),("SliderThumbBackgroundPressed",204),("SliderTrackValueFill",235),("SliderTrackValueFillPointerOver",204),("SliderTrackValueFillPressed",153)};
@@ -135,7 +142,7 @@ AppWindow.Changed+=(w,a)=>{if(a.DidSizeChange&&(w.Size.Width<1000||w.Size.Height
     async void Loaded(object sender,RoutedEventArgs e)
     {
         if(ready)return;
-        ApplyTheme();Ambient.ThemeMode=prefs.Theme==2?"light":"dark";Ambient.Aurora=prefs.Aurora&&!prefs.ReducedMotion;Ambient.ApplyAurora();Ambient.PaletteChanged+=c=>DispatcherQueue.TryEnqueue(()=>ApplyAccent(c));
+        ApplyTheme();Ambient.ThemeMode=LightTheme?"light":"dark";Ambient.Aurora=prefs.Aurora&&!prefs.ReducedMotion;Ambient.ApplyAurora();Ambient.PaletteChanged+=c=>DispatcherQueue.TryEnqueue(()=>ApplyAccent(c));
         try{audio=new AudioService();devices=audio.Devices();if(Device==null){var d=devices.FirstOrDefault(x=>x.Default)??devices.FirstOrDefault();if(d!=null){prefs.DeviceId=d.Id;prefs.DeviceBackend=d.Backend;}}}
         catch(Exception ex){Toast("音频引擎无法启动",ex.Message,true);}
         tracks=await Task.Run(library.Load);foreach(var id in prefs.Queue){var t=tracks.FirstOrDefault(t=>t.Id==id);if(t!=null)queue.Add(t);}
@@ -175,7 +182,7 @@ AppWindow.Changed+=(w,a)=>{if(a.DidSizeChange&&(w.Size.Width<1000||w.Size.Height
     void Search_Changed(AutoSuggestBox sender,AutoSuggestBoxTextChangedEventArgs args){searchTimer.Stop();searchTimer.Start();}
     void Album_ItemClick(object sender,ItemClickEventArgs e){if(e.ClickedItem is Track t){albumFilter=t.AlbumKey;showAlbums=false;PageTitle.Text=t.Album;Filter();}}
     async void ArtistsTab_Click(object sender,RoutedEventArgs e){var list=new ListView{ItemsSource=tracks.Select(t=>t.Artist).Distinct().Order().ToList(),SelectionMode=ListViewSelectionMode.Single,MaxHeight=380};var dialog=Dialog("选择艺术家",list,"查看歌曲");if(await Show(dialog)==ContentDialogResult.Primary&&list.SelectedItem is string name){artistFilter=name;albumFilter=null;showAlbums=false;PageTitle.Text=name;Filter();}}
-    ContentDialog Dialog(string title,object content,string primary="确定")=>new(){Title=title,Content=content,PrimaryButtonText=primary,CloseButtonText="取消",DefaultButton=ContentDialogButton.Primary,XamlRoot=Root.XamlRoot,RequestedTheme=ElementTheme.Dark};
+    ContentDialog Dialog(string title,object content,string primary="确定")=>new(){Title=title,Content=content,PrimaryButtonText=primary,CloseButtonText="取消",DefaultButton=ContentDialogButton.Primary,XamlRoot=Root.XamlRoot,RequestedTheme=Root.ActualTheme};
     void RefreshPlaylists(){PlaylistNav.Children.Clear();foreach(var p in library.Playlists()){var b=new Button{Content="♫  "+p.Name,Style=(Style)Application.Current.Resources["NavButton"],Tag=p};
         // 右键删除：确认后连歌单关系一并清除，歌曲文件不受影响；删的是当前筛选中的列表则回到音乐库
         var menu=new MenuFlyout();var del=new MenuFlyoutItem{Text="删除播放列表"};del.Click+=async(_,_)=>{
@@ -204,9 +211,22 @@ AppWindow.Changed+=(w,a)=>{if(a.DidSizeChange&&(w.Size.Width<1000||w.Size.Height
             if(!queue.Any(t=>t.Id==track.Id))queue.Add(track);
             PlayIcon.Glyph="\uE769";SetBusy(false);await ShowTrack(track);AppPaths.Save(prefs);
         }catch(Exception ex){SetBusy(false);PlayIcon.Glyph="\uE768";Toast("暂时无法播放",ex.Message,true);
-            if(!closing){var content=new TextBlock{Text=ex.Message+"\n\n可以使用 PCM 兼容输出；必要时将多声道混成立体声。此选择会保存到当前设备。",TextWrapping=TextWrapping.Wrap,MaxWidth=420};var dlg=Dialog("输出格式需要调整",content,"使用 PCM 兼容播放");dlg.SecondaryButtonText="打开输出设置";
+            if(!closing){
+                ContentDialog dlg;bool busy=ex.Message.Contains("占用");
+                if(busy){
+                    var content=new TextBlock{Text=ex.Message+"\n\n共享模式由 Windows 混音，恢复出声最快；独占模式需要在设备空闲后重试。",TextWrapping=TextWrapping.Wrap,MaxWidth=420};
+                    dlg=Dialog("音频设备被占用",content,"切换到共享模式播放");dlg.SecondaryButtonText="打开输出设置";
+                }else{
+                    var content=new TextBlock{Text=ex.Message+"\n\n可以使用 PCM 兼容输出；必要时将多声道混成立体声。此选择会保存到当前设备。",TextWrapping=TextWrapping.Wrap,MaxWidth=420};
+                    dlg=Dialog("输出格式需要调整",content,"使用 PCM 兼容播放");dlg.SecondaryButtonText="打开输出设置";
+                }
                 var choice=await Show(dlg);
-                if(choice==ContentDialogResult.Primary&&Device!=null){var p=prefs.Profile;p.DsdMode=0;p.PcmRate=176400;p.ForceRate=Device.Rate>0?Device.Rate:44100;p.Downmix=track.Channels>(Device.Channels>0?Device.Channels:2);AppPaths.Save(prefs);DispatcherQueue.TryEnqueue(async()=>await Play(track,position));}
+                if(choice==ContentDialogResult.Primary&&Device!=null){
+                    var p=prefs.Profile;
+                    if(busy)p.Backend=0;
+                    else{p.DsdMode=0;p.PcmRate=176400;p.ForceRate=Device.Rate>0?Device.Rate:44100;p.Downmix=track.Channels>(Device.Channels>0?Device.Channels:2);}
+                    AppPaths.Save(prefs);DispatcherQueue.TryEnqueue(async()=>await Play(track,position));
+                }
                 else if(choice==ContentDialogResult.Secondary)DispatcherQueue.TryEnqueue(async()=>await Settings());
             }
         }finally{SetBusy(false);playGate.Release();}
@@ -214,35 +234,59 @@ AppWindow.Changed+=(w,a)=>{if(a.DidSizeChange&&(w.Size.Width<1000||w.Size.Height
     async Task ShowTrack(Track t){NowTitle.Text=MiniTitle.Text=t.Title;NowArtist.Text=MiniArtist.Text=t.Artist;NowAlbum.Text=t.Album;CurrentHeart.Glyph=t.FavoriteGlyph;Total.Text=t.DurationText;await SetCover(t.Cover);mediaCancellation.Cancel();mediaCancellation.Dispose();mediaCancellation=new();lyricIndex=-2;_ = LoadMedia(t,mediaCancellation.Token);}
     async Task SetCover(string file)
     {
-        Ambient.ThemeMode=prefs.Theme==2?"light":"dark";
+        Ambient.ThemeMode=LightTheme?"light":"dark";
         Ambient.SetSource(!string.IsNullOrEmpty(file)&&File.Exists(file)?file:null);
         AttachReflection(!string.IsNullOrEmpty(file)&&File.Exists(file)?file:null);
         if(!string.IsNullOrEmpty(file)&&File.Exists(file)){var image=new BitmapImage(new Uri(file));CoverImage.Source=MiniCoverImage.Source=image;try{var f=await StorageFile.GetFileFromPathAsync(file);using var s=await f.OpenReadAsync();var d=await BitmapDecoder.CreateAsync(s);var data=await d.GetPixelDataAsync(BitmapPixelFormat.Rgba8,BitmapAlphaMode.Ignore,new BitmapTransform{ScaledWidth=32,ScaledHeight=32},ExifOrientationMode.IgnoreExifOrientation,ColorManagementMode.DoNotColorManage);var bytes=data.DetachPixelData();long r=0,g=0,b=0;for(int i=0;i<bytes.Length;i+=4){r+=bytes[i];g+=bytes[i+1];b+=bytes[i+2];}int n=bytes.Length/4;Ambient.SetTint(Color.FromArgb(255,(byte)Math.Clamp(r/n,35,180),(byte)Math.Clamp(g/n,35,180),(byte)Math.Clamp(b/n,35,180)));}catch{}}
         else{CoverImage.Source=MiniCoverImage.Source=null;Ambient.SetTint(Color.FromArgb(255,90,129,114));}
     }
-    // Now 页封面倒影：翻转的封面表面 + 向下渐隐遮罩，纯合成层无额外解码。
+    // Now 页封面倒影：与封面显示区同尺寸的镜像表面，只露出顶部一条并向下渐隐。
+    Microsoft.UI.Composition.SpriteVisual? reflectionSprite;
+    Microsoft.UI.Composition.CompositionRoundedRectangleGeometry? reflectionGeo;
+    Microsoft.UI.Composition.CompositionLinearGradientBrush? reflectionFade;
     void AttachReflection(string? coverFile)
     {
         try{
             var host=CoverReflection;
-            if(coverFile==null){Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(host,null);return;}
+            reflectionSprite=null;
+            LargeCover.SizeChanged-=OnCoverSizeChanged;LargeCover.SizeChanged+=OnCoverSizeChanged;
+            if(coverFile==null||!File.Exists(coverFile)){Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(host,null);return;}
             var compositor=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(host).Compositor;
             var surface=Microsoft.UI.Xaml.Media.LoadedImageSurface.StartLoadFromUri(new Uri(coverFile));
             var surfaceBrush=compositor.CreateSurfaceBrush(surface);
             surfaceBrush.Stretch=Microsoft.UI.Composition.CompositionStretch.UniformToFill;
-            surfaceBrush.TransformMatrix=System.Numerics.Matrix3x2.CreateScale(1,-1);
-            var fade=compositor.CreateLinearGradientBrush();
-            fade.StartPoint=new System.Numerics.Vector2(0,0);fade.EndPoint=new System.Numerics.Vector2(0,1);
-            fade.ColorStops.Add(compositor.CreateColorGradientStop(0f,Color.FromArgb(170,255,255,255)));
-            fade.ColorStops.Add(compositor.CreateColorGradientStop(1f,Colors.Transparent));
+            double w=LargeCover.ActualWidth,h=LargeCover.ActualHeight;if(w<80)w=360;if(h<80)h=310;
+            float fh=(float)h;
+            // 绕封面中线垂直镜像：可见倒影的顶边恰好对应封面底边。
+            surfaceBrush.TransformMatrix=System.Numerics.Matrix3x2.CreateScale(1,-1,new System.Numerics.Vector2(0,fh/2f));
+            reflectionFade=compositor.CreateLinearGradientBrush();
+            reflectionFade.StartPoint=new System.Numerics.Vector2(0,0);
+            reflectionFade.ColorStops.Add(compositor.CreateColorGradientStop(0f,Color.FromArgb(185,255,255,255)));
+            reflectionFade.ColorStops.Add(compositor.CreateColorGradientStop(1f,Colors.Transparent));
             var mask=compositor.CreateMaskBrush();
-            mask.Source=surfaceBrush;mask.Mask=fade;
-            var sprite=compositor.CreateSpriteVisual();
-            sprite.Brush=mask;
-            Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(host,sprite);
-            host.SizeChanged+=(h,_)=>{var b=(Border)h;sprite.Size=new System.Numerics.Vector2((float)b.ActualWidth,(float)b.ActualHeight);};
-            sprite.Size=new System.Numerics.Vector2((float)host.ActualWidth,(float)host.ActualHeight);
+            mask.Source=surfaceBrush;mask.Mask=reflectionFade;
+            reflectionSprite=compositor.CreateSpriteVisual();
+            reflectionSprite.Brush=mask;
+            reflectionGeo=compositor.CreateRoundedRectangleGeometry();
+            var clip=compositor.CreateGeometricClip();
+            clip.Geometry=reflectionGeo;
+            reflectionSprite.Clip=clip;
+            Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(host,reflectionSprite);
+            UpdateReflectionLayout();
         }catch(Exception e){AppPaths.Log("Reflection: "+e.Message);}
+    }
+    void OnCoverSizeChanged(object sender,SizeChangedEventArgs e)=>UpdateReflectionLayout();
+    void UpdateReflectionLayout()
+    {
+        var sprite=reflectionSprite;var geo=reflectionGeo;var fade=reflectionFade;if(sprite==null||geo==null||fade==null)return;
+        double w=LargeCover.ActualWidth,h=LargeCover.ActualHeight;if(w<80)w=360;if(h<80)h=310;
+        float fw=(float)w,fh=(float)h,fv=(float)CoverReflection.ActualHeight;
+        CoverReflection.Width=w;
+        sprite.Size=new System.Numerics.Vector2(fw,fh);
+        float radius=Math.Min(18f,fw/6);
+        geo.Size=new System.Numerics.Vector2(fw,fv);
+        geo.CornerRadius=new System.Numerics.Vector2(radius,radius);
+        fade.EndPoint=new System.Numerics.Vector2(0,fv/fh);
     }
     async Task LoadMedia(Track t,CancellationToken token)
     {
@@ -369,10 +413,10 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
                 if(d.Name==AsioSetup.DriverName&&asioTarget.SelectedItem is AudioDevice t&&t.Index>=0){atId=t.Id;atName=t.Name;}
                 prefs.DeviceId=d.Id;prefs.DeviceBackend=d.Backend;prefs.Profiles[$"{d.Backend}:{d.Id}"]=new(){Backend=backend,DsdMode=dsdBox.SelectedIndex,DopConfirmed=dop.IsChecked==true,ForceRate=rates[rate.SelectedIndex],Downmix=downmix.IsChecked==true,Mapping=map,AsioTargetId=atId,AsioTargetName=atName};
                 prefs.Online=onlineCheck.IsOn;prefs.ReducedMotion=motion.IsOn;Ambient.Reduced=prefs.ReducedMotion;prefs.CloseToTray=closeBehavior.SelectedIndex==1;prefs.Theme=themeBox.SelectedIndex;prefs.Aurora=auroraCheck.IsOn;ApplyTheme();
-                Ambient.ThemeMode=prefs.Theme==2?"light":"dark";Ambient.Aurora=prefs.Aurora&&!prefs.ReducedMotion;Ambient.ApplyAurora();
+                Ambient.ThemeMode=LightTheme?"light":"dark";Ambient.Aurora=prefs.Aurora&&!prefs.ReducedMotion;Ambient.ApplyAurora();
                 AppPaths.Save(prefs);
                 // 主题切换后按新主题重新渲染/选取氛围背景与歌词配色。
-                Ambient.ThemeMode=prefs.Theme==2?"light":"dark";lyricIndex=-2;
+                Ambient.ThemeMode=LightTheme?"light":"dark";lyricIndex=-2;
                 if(current!=null){var cover=current.Cover;lyricOffset=library.Lyrics(current.Id).Offset;await SetCover(cover);if(rawLyrics.Length>0)DisplayLyrics(rawLyrics);}
                 else Ambient.SetSource(null);
             }catch{args.Cancel=true;hint.Text="请输入 8 个不同的正整数作为通道映射。";}

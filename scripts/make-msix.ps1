@@ -4,7 +4,7 @@
 # 关键坑 2：PS5.1 的 -Encoding UTF8 带 BOM，makeappx 不认；manifest 必须无 BOM。
 # 关键坑 3：正则替换串里 '$1'+数字 会被 .NET 当成更大的组号，必须写 ${1}/${2}。
 # 关键坑 4：读 manifest 必须用 [IO.File]::ReadAllText——PS5.1 的 Get-Content 对无 BOM 的 UTF-8 按 GBK 读，中文会毁掉整个 manifest。
-param([string]$Version = '1.0.1.0', [string]$PfxPassword = 'luma-msix')
+param([string]$Version = '1.0.2.0', [string]$PfxPassword = 'luma-msix')
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $layout=Join-Path $root 'build/msix-layout'

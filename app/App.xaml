@@ -2,13 +2,36 @@
  <Application.Resources>
   <ResourceDictionary>
    <ResourceDictionary.MergedDictionaries><XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls"/></ResourceDictionary.MergedDictionaries>
-   <SolidColorBrush x:Key="Accent" Color="#C9E8B1"/>
-   <SolidColorBrush x:Key="TextPrimary" Color="#F2F4F0"/>
-   <SolidColorBrush x:Key="TextSecondary" Color="#99A5A3"/>
-   <SolidColorBrush x:Key="GlassStroke" Color="#28FFFFFF"/>
-   <SolidColorBrush x:Key="GlassFill" Color="#15FFFFFF"/>
-   <Style TargetType="Button"><Setter Property="CornerRadius" Value="14"/><Setter Property="Padding" Value="16,10"/><Setter Property="Background" Value="#14FFFFFF"/><Setter Property="BorderBrush" Value="#20FFFFFF"/><Setter Property="BorderThickness" Value="1"/></Style>
-   <!-- 滑杆重皮：去掉默认深色外环（hover 时像黑色方块故障），圆点与进度填充跟随封面强调色（MainWindow.ApplyAccent 同步）。 -->
+   <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Default">
+     <SolidColorBrush x:Key="Accent" Color="#E3E0D5"/><SolidColorBrush x:Key="PlayIconColor" Color="#17231B"/>
+     <SolidColorBrush x:Key="TextPrimary" Color="#F2F4F0"/>
+     <SolidColorBrush x:Key="TextSecondary" Color="#A9B4AE"/>
+     <SolidColorBrush x:Key="StrokeWeak" Color="#13FFFFFF"/>
+     <SolidColorBrush x:Key="WindowFallback" Color="#101918"/>
+     <SolidColorBrush x:Key="ButtonFill" Color="#14FFFFFF"/><SolidColorBrush x:Key="ButtonStroke" Color="#20FFFFFF"/><SolidColorBrush x:Key="ButtonFillStrong" Color="#26FFFFFF"/>
+     <AcrylicBrush x:Key="SidebarBackground" TintColor="#182420" TintOpacity="0.4" TintLuminosityOpacity="0.6" FallbackColor="#141B18"/>
+     <AcrylicBrush x:Key="BottomBarBackground" TintColor="#1C2622" TintOpacity="0.4" TintLuminosityOpacity="0.58" FallbackColor="#161C19"/>
+     <AcrylicBrush x:Key="SignalChipBackground" TintColor="#18221E" TintOpacity="0.35" TintLuminosityOpacity="0.55" FallbackColor="#131A17"/>
+     <AcrylicBrush x:Key="HeroBackground" TintColor="#202B26" TintOpacity="0.38" TintLuminosityOpacity="0.55" FallbackColor="#1C2620"/>
+     <AcrylicBrush x:Key="QueueBackground" TintColor="#1A2620" TintOpacity="0.45" TintLuminosityOpacity="0.62" FallbackColor="#15201B"/>
+    </ResourceDictionary>
+    <ResourceDictionary x:Key="Light">
+     <SolidColorBrush x:Key="Accent" Color="#33302B"/><SolidColorBrush x:Key="PlayIconColor" Color="#F5F7F3"/>
+     <SolidColorBrush x:Key="TextPrimary" Color="#1B211E"/>
+     <SolidColorBrush x:Key="TextSecondary" Color="#3E4A44"/>
+     <SolidColorBrush x:Key="StrokeWeak" Color="#17000000"/>
+     <SolidColorBrush x:Key="WindowFallback" Color="#EDF1EC"/>
+     <SolidColorBrush x:Key="ButtonFill" Color="#12000000"/><SolidColorBrush x:Key="ButtonStroke" Color="#22000000"/><SolidColorBrush x:Key="ButtonFillStrong" Color="#2A000000"/>
+     <AcrylicBrush x:Key="SidebarBackground" TintColor="#FBFDFB" TintOpacity="0.62" TintLuminosityOpacity="0.82" FallbackColor="#F2F5F1"/>
+     <AcrylicBrush x:Key="BottomBarBackground" TintColor="#FFFFFF" TintOpacity="0.5" TintLuminosityOpacity="0.8" FallbackColor="#F6F8F5"/>
+     <AcrylicBrush x:Key="SignalChipBackground" TintColor="#FFFFFF" TintOpacity="0.42" TintLuminosityOpacity="0.75" FallbackColor="#F2F5F1"/>
+     <AcrylicBrush x:Key="HeroBackground" TintColor="#FFFFFF" TintOpacity="0.4" TintLuminosityOpacity="0.72" FallbackColor="#F0F3EF"/>
+     <AcrylicBrush x:Key="QueueBackground" TintColor="#FBFDFB" TintOpacity="0.5" TintLuminosityOpacity="0.78" FallbackColor="#F2F5F1"/>
+    </ResourceDictionary>
+   </ResourceDictionary.ThemeDictionaries>
+   <Style TargetType="Button"><Setter Property="CornerRadius" Value="14"/><Setter Property="Padding" Value="16,10"/><Setter Property="Background" Value="{ThemeResource ButtonFill}"/><Setter Property="BorderBrush" Value="{ThemeResource ButtonStroke}"/><Setter Property="BorderThickness" Value="1"/></Style>
+   <!-- 滑杆重皮：去掉默认的深色外环（hover 时像黑色方块故障），圆点与进度填充跟随封面强调色（MainWindow.ApplyAccent 同步）。 -->
    <SolidColorBrush x:Key="SliderOuterThumbBackground" Color="Transparent"/><SolidColorBrush x:Key="SliderThumbBorderBrush" Color="Transparent"/>
    <SolidColorBrush x:Key="SliderThumbBackground" Color="#E3E0D5"/><SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#CCE3E0D5"/><SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#99E3E0D5"/>
    <SolidColorBrush x:Key="SliderTrackValueFill" Color="#E5E3E0D5"/><SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#CCE3E0D5"/><SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#99E3E0D5"/>

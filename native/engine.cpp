@@ -181,7 +181,17 @@ struct Engine {
         }else{
             DWORD flags=backend==1?BASS_WASAPI_EXCLUSIVE|BASS_WASAPI_EVENT:0;
             if(BASS_WASAPI_CheckFormat(device,rate,channels,flags)==(DWORD)-1)throw std::runtime_error("设备不支持此采样率或声道，请选择兼容格式");
-            if(!BASS_WASAPI_Init(device,rate,channels,flags,0.15f,0,wasapiProc,this))throw std::runtime_error("无法取得音频设备；可能被占用或独占模式未开启（"+std::to_string(BASS_ErrorGetCode())+"）");
+            // 独占请求偶尔撞上音频引擎正在切换的窗口，短暂重试两次；仍 BUSY 则是真实占用。
+            bool opened=false;for(int attempt=0;attempt<3&&!opened;++attempt){
+                if(attempt)Sleep(300);
+                if(BASS_WASAPI_Init(device,rate,channels,flags,0.15f,0,wasapiProc,this))opened=true;
+                else if(BASS_ErrorGetCode()!=BASS_ERROR_BUSY)break;
+            }
+            if(!opened){
+                DWORD code=BASS_ErrorGetCode();
+                if(code==BASS_ERROR_BUSY)throw std::runtime_error("音频设备被其他程序占用，或存在残留的独占会话（46）。\n可切换共享模式播放；或重启 Windows 音频服务/重新插拔设备后恢复独占。");
+                throw std::runtime_error("无法取得音频设备（"+std::to_string(code)+"）");
+            }
             wasapi=true;BASS_WASAPI_INFO info{};BASS_WASAPI_GetInfo(&info);
             if(dsd&&dsdMode==1&&(info.format==BASS_WASAPI_FORMAT_8BIT||info.format==BASS_WASAPI_FORMAT_16BIT))throw std::runtime_error("DoP 输出至少需要 24 位设备格式");
             latency=(double)info.buflen/(rate*channels*4);BASS_WASAPI_SetNotify(wasapiNotify,this);

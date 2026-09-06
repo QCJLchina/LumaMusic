@@ -61,6 +61,9 @@ public class Preferences
     public Dictionary<string,DeviceProfile> Profiles {get;set;}=[];
     public List<string> Roots {get;set;}=[];public List<string> Queue {get;set;}=[];
     public string LastTrack {get;set;}="";public double LastPosition {get;set;}
+    // 主题：0 跟随系统 / 1 深色 / 2 浅色；关闭窗口最小化到托盘；背景流光（取色自封面）
+    public int Theme {get;set;} public bool CloseToTray {get;set;} public bool Aurora {get;set;}=true;
+    public DateTime LastUpdateCheck {get;set;}
     public DeviceProfile Profile=>Profiles.TryGetValue($"{DeviceBackend}:{DeviceId}",out var p)?p:Profiles[$"{DeviceBackend}:{DeviceId}"]=new(){Backend=DeviceBackend};
 }
 public record LyricLine(double Time,string Text);
