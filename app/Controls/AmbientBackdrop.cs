@@ -47,7 +47,7 @@ public sealed class AmbientBackdrop : UserControl
     }
     static async Task<string?> RenderBlurredAsync(string coverPath)
     {
-        var key=Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(coverPath.ToLowerInvariant())))[..16].ToLowerInvariant();
+        var key="v3-"+Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(coverPath.ToLowerInvariant())))[..16].ToLowerInvariant();
         var outFile=System.IO.Path.Combine(Services.AppPaths.Cache,"ambient-"+key+".png");
         if(File.Exists(outFile))return outFile;
         await genGate.WaitAsync();
@@ -64,12 +64,12 @@ public sealed class AmbientBackdrop : UserControl
                 float scale=MathF.Max(w/iw,h/ih)*1.25f;
                 using var blur=new GaussianBlurEffect{Source=bmp,BlurAmount=MathF.Max(70,w*.06f),BorderMode=EffectBorderMode.Hard,Optimization=EffectOptimization.Balanced};
                 using var sat=new SaturationEffect{Source=blur,Saturation=1.18f};
-                ds.DrawImage(sat,new Rect((w-iw*scale)/2f,(h-ih*scale)/2f,iw*scale,ih*scale),new Rect(0,0,iw,ih),0.85f);
-                // 压暗直接烘进图里：顶部保标题、中部适中、底部最深保播放条对比度。
+                ds.DrawImage(sat,new Rect((w-iw*scale)/2f,(h-ih*scale)/2f,iw*scale,ih*scale),new Rect(0,0,iw,ih),0.9f);
+                // 压暗直接烘进图里：只需保证整体文字对比，玻璃的层次交给面板 Acrylic。
                 using var shade=new CanvasLinearGradientBrush(device,new[]{
-                    new CanvasGradientStop{Position=0,Color=Color.FromArgb(140,6,10,9)},
-                    new CanvasGradientStop{Position=.45f,Color=Color.FromArgb(88,6,10,9)},
-                    new CanvasGradientStop{Position=1,Color=Color.FromArgb(175,4,8,7)}}){StartPoint=new Vector2(0,0),EndPoint=new Vector2(0,h)};
+                    new CanvasGradientStop{Position=0,Color=Color.FromArgb(95,6,10,9)},
+                    new CanvasGradientStop{Position=.45f,Color=Color.FromArgb(55,6,10,9)},
+                    new CanvasGradientStop{Position=1,Color=Color.FromArgb(125,4,8,7)}}){StartPoint=new Vector2(0,0),EndPoint=new Vector2(0,h)};
                 ds.FillRectangle(0,0,w,h,shade);
             }
             var pixels=target.GetPixelBytes();
