@@ -50,6 +50,8 @@ public class DeviceProfile
     public int Backend {get;set;}=1;public int DsdMode {get;set;}=3;public bool DopConfirmed {get;set;}
     public int PcmRate {get;set;}=176400;public int ForceRate {get;set;} public bool Downmix {get;set;}
     public int[] Mapping {get;set;}=[0,1,2,3,4,5,6,7];
+    // FlexASIO 定向目标（端点 ID 为身份，名字给 FlexASIO 匹配用）；空 = Windows 默认输出
+    public string AsioTargetId {get;set;}="";public string AsioTargetName {get;set;}="";
 }
 public class Preferences
 {

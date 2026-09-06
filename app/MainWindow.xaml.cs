@@ -111,6 +111,7 @@ public sealed partial class MainWindow : Window
         try{
             if(generation!=playGeneration)return;SetBusy(true);Notice.IsOpen=false;endSeen=DateTime.MinValue;
             await audio.Open(track,Device,prefs.Profile,prefs.Volume,position);
+            if(FlexAsioConfig.LastWarning.Length>0)Toast("ASIO 提示",FlexAsioConfig.LastWarning);
             current=track;lastState=audio.State();prefs.LastTrack=track.Id;
             if(!queue.Any(t=>t.Id==track.Id))queue.Add(track);
             PlayIcon.Glyph="\uE769";SetBusy(false);await ShowTrack(track);AppPaths.Save(prefs);
@@ -184,6 +185,8 @@ public sealed partial class MainWindow : Window
         // 开箱即用的 ASIO：系统无任何 ASIO 驱动时，提供随包分发的 FlexASIO 一键安装（GPL，见 THIRD-PARTY-NOTICES.md）
         var asioHint=new TextBlock{FontSize=11,TextWrapping=TextWrapping.Wrap,Foreground=Brush(200,172,194,176),Visibility=Visibility.Collapsed};
         var asioInstall=new Button{Content="一键安装 FlexASIO 通用驱动（WASAPI 独占，需管理员确认）",HorizontalAlignment=HorizontalAlignment.Left,Visibility=Visibility.Collapsed};
+        // FlexASIO 是通用壳，需定向到具体输出设备；端点 ID 作身份记忆，名字交给 FlexASIO 匹配
+        var asioTarget=new ComboBox{Header="FlexASIO 输出目标（WASAPI 设备）",HorizontalAlignment=HorizontalAlignment.Stretch,Visibility=Visibility.Collapsed,SelectedValuePath="Id",DisplayMemberPath="Name",ItemsSource=new AudioDevice[]{new(-1,1,"（Windows 默认输出）","",false,0,0)}.Concat(devices.Where(d=>d.Backend==1)).ToList()};
         var dsdBox=new ComboBox{Header="DSD 播放方式",ItemsSource=new[]{"DSD 转 PCM","DoP 透传","ASIO 原生 DSD","播放前选择"},SelectedIndex=prefs.Profile.DsdMode,HorizontalAlignment=HorizontalAlignment.Stretch};
         var dop=new CheckBox{Content="我已确认此 DAC 支持 DoP",IsChecked=prefs.Profile.DopConfirmed};
         int[] rates=[0,44100,48000,88200,96000,176400,192000,352800,384000];var rate=new ComboBox{Header="PCM 输出采样率",ItemsSource=rates.Select(r=>r==0?"跟随音源":$"{r/1000d:0.#} kHz").ToList(),SelectedIndex=Math.Max(0,Array.IndexOf(rates,prefs.Profile.ForceRate)),HorizontalAlignment=HorizontalAlignment.Stretch};
@@ -193,7 +196,7 @@ public sealed partial class MainWindow : Window
         var motion=new ToggleSwitch{Header="减少动态效果",IsOn=prefs.ReducedMotion,OnContent="开启",OffContent="关闭"};
         var hint=new TextBlock{Text="独占模式会占用所选设备。DSD 透传时软件音量不可用，请使用 DAC 控制音量。",TextWrapping=TextWrapping.Wrap,FontSize=11,Foreground=Brush(200,172,194,176)};
         var scan=new Button{Content="重新扫描已添加的音乐文件夹"};scan.Click+=async(_,_)=>await Import(prefs.Roots);
-        void LoadProfile(AudioDevice d){var key=$"{d.Backend}:{d.Id}";var p=prefs.Profiles.TryGetValue(key,out var profile)?profile:new DeviceProfile{Backend=d.Backend};modeBox.SelectedIndex=p.Backend;dsdBox.SelectedIndex=p.DsdMode;dop.IsChecked=p.DopConfirmed;downmix.IsChecked=p.Downmix;rate.SelectedIndex=Math.Max(0,Array.IndexOf(rates,p.ForceRate));mapping.Text=string.Join(", ",p.Mapping.Select(i=>i+1));}
+        void LoadProfile(AudioDevice d){var key=$"{d.Backend}:{d.Id}";var p=prefs.Profiles.TryGetValue(key,out var profile)?profile:new DeviceProfile{Backend=d.Backend};modeBox.SelectedIndex=p.Backend;dsdBox.SelectedIndex=p.DsdMode;dop.IsChecked=p.DopConfirmed;downmix.IsChecked=p.Downmix;rate.SelectedIndex=Math.Max(0,Array.IndexOf(rates,p.ForceRate));mapping.Text=string.Join(", ",p.Mapping.Select(i=>i+1));asioTarget.Visibility=d.Name==AsioSetup.DriverName?Visibility.Visible:Visibility.Collapsed;asioTarget.SelectedValue=p.AsioTargetId;}
         deviceBox.SelectionChanged+=(_,_)=>{if(deviceBox.SelectedItem is AudioDevice d)LoadProfile(d);};
         void RefreshAsioState(){bool show=modeBox.SelectedIndex==2&&!devices.Any(d=>d.Backend==2);asioHint.Text=show?"未检测到系统中的 ASIO 驱动。可一键安装随应用附带的 FlexASIO 通用驱动（GPL 开源），安装后即以 ASIO 独占方式输出。":"";asioHint.Visibility=asioInstall.Visibility=show?Visibility.Visible:Visibility.Collapsed;}
         modeBox.SelectionChanged+=(_,_)=>RefreshAsioState();
@@ -209,7 +212,8 @@ public sealed partial class MainWindow : Window
             finally{asioInstall.IsEnabled=true;}
         };
         RefreshAsioState();
-        var panel=new StackPanel{Spacing=15,Width=470};foreach(var el in new UIElement[]{deviceBox,modeBox,asioHint,asioInstall,dsdBox,dop,rate,downmix,mapping,hint,onlineCheck,motion,scan})panel.Children.Add(el);
+        if(deviceBox.SelectedItem is AudioDevice d0){asioTarget.Visibility=d0.Name==AsioSetup.DriverName?Visibility.Visible:Visibility.Collapsed;asioTarget.SelectedValue=prefs.Profile.AsioTargetId;}
+        var panel=new StackPanel{Spacing=15,Width=470};foreach(var el in new UIElement[]{deviceBox,modeBox,asioHint,asioInstall,asioTarget,dsdBox,dop,rate,downmix,mapping,hint,onlineCheck,motion,scan})panel.Children.Add(el);
         var dialog=Dialog("播放设置",new ScrollViewer{Content=panel,MaxHeight=530},"保存设置");
         dialog.PrimaryButtonClick+=(_,args)=>{
             if(deviceBox.SelectedItem is not AudioDevice d){args.Cancel=true;hint.Text="请选择音频设备。";return;}
@@ -218,7 +222,9 @@ public sealed partial class MainWindow : Window
             if(dsdBox.SelectedIndex==2&&d.Backend!=2){args.Cancel=true;hint.Text="原生 DSD 需要选择 ASIO 驱动。";return;}
             if(dsdBox.SelectedIndex==1&&modeBox.SelectedIndex==0){args.Cancel=true;hint.Text="DoP 不能通过共享模式播放。";return;}
             try{var map=mapping.Text.Split(',',StringSplitOptions.TrimEntries).Select(int.Parse).Select(i=>i-1).ToArray();if(map.Length!=8||map.Any(i=>i<0)||map.Distinct().Count()!=8)throw new FormatException();
-                prefs.DeviceId=d.Id;prefs.DeviceBackend=d.Backend;prefs.Profiles[$"{d.Backend}:{d.Id}"]=new(){Backend=modeBox.SelectedIndex,DsdMode=dsdBox.SelectedIndex,DopConfirmed=dop.IsChecked==true,ForceRate=rates[rate.SelectedIndex],Downmix=downmix.IsChecked==true,Mapping=map};
+                string atId="",atName="";
+                if(d.Name==AsioSetup.DriverName&&asioTarget.SelectedItem is AudioDevice t&&t.Index>=0){atId=t.Id;atName=t.Name;}
+                prefs.DeviceId=d.Id;prefs.DeviceBackend=d.Backend;prefs.Profiles[$"{d.Backend}:{d.Id}"]=new(){Backend=modeBox.SelectedIndex,DsdMode=dsdBox.SelectedIndex,DopConfirmed=dop.IsChecked==true,ForceRate=rates[rate.SelectedIndex],Downmix=downmix.IsChecked==true,Mapping=map,AsioTargetId=atId,AsioTargetName=atName};
                 prefs.Online=onlineCheck.IsOn;prefs.ReducedMotion=motion.IsOn;Field.Reduced=Ambient.Reduced=prefs.ReducedMotion;AppPaths.Save(prefs);
             }catch{args.Cancel=true;hint.Text="请输入 8 个不同的正整数作为通道映射。";}
         };

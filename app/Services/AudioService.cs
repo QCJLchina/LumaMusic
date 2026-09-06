@@ -24,8 +24,33 @@ public sealed class AudioService : IDisposable
         await serial.WaitAsync();Busy=true;
         try{
             if(profile.DsdMode==1&&!profile.DopConfirmed&&track.Format is "DSF" or "DFF" or "ISO")throw new InvalidOperationException("请先确认这台 DAC 支持 DoP。");
-            await Task.Run(()=>{if(luma_open(track.Path,track.Subsong,profile.Backend,device.Index,profile.DsdMode,profile.PcmRate,profile.ForceRate,profile.Downmix?1:0,profile.Mapping,volume,position)==0)throw new InvalidOperationException(Error());});
+            FlexAsioConfig.LastWarning="";
+            async Task Start(){
+                await Task.Run(()=>{if(luma_open(track.Path,track.Subsong,profile.Backend,device.Index,profile.DsdMode,profile.PcmRate,profile.ForceRate,profile.Downmix?1:0,profile.Mapping,volume,position)==0)throw new InvalidOperationException(Error());});
+            }
+            if(profile.Backend==2&&device.Name==AsioSetup.DriverName)
+            {
+                FlexAsioTarget(profile);
+                try{await Start();}
+                catch(InvalidOperationException)when(FlexAsioConfig.Targeted){
+                    // 目标设备名失配或被占用：回退 Windows 默认输出重试一次
+                    FlexAsioConfig.Reset();FlexAsioConfig.Targeted=false;
+                    FlexAsioConfig.LastWarning="ASIO 目标设备无法打开，已回退 Windows 默认输出。";
+                    await Start();
+                }
+            }
+            else await Start();
         }finally{Busy=false;serial.Release();}
+    }
+    // FlexASIO 不指向具体硬件，按档案里的目标端点 ID 解析设备名写入其配置；ID 失效时退回记录名
+    void FlexAsioTarget(DeviceProfile profile)
+    {
+        string? target=null;
+        var match=Devices().FirstOrDefault(d=>d.Backend==1&&d.Id==profile.AsioTargetId);
+        if(match!=null)target=match.Name;
+        else if(!string.IsNullOrEmpty(profile.AsioTargetName)){target=profile.AsioTargetName;FlexAsioConfig.LastWarning="ASIO 目标设备当前不在线，尝试按名称定位。";}
+        FlexAsioConfig.Targeted=!string.IsNullOrEmpty(target);
+        FlexAsioConfig.Ensure(FlexAsioConfig.Build(target));
     }
     public void Pause(bool pause){if(!Busy&&luma_pause(pause?1:0)==0)throw new InvalidOperationException(Error());}
     public void Volume(float volume){if(!Busy)luma_volume(volume);}
