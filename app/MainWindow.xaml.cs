@@ -202,8 +202,33 @@ public sealed partial class MainWindow : Window
     {
         Ambient.ThemeMode=prefs.Theme==2?"light":"dark";
         Ambient.SetSource(!string.IsNullOrEmpty(file)&&File.Exists(file)?file:null);
+        AttachReflection(!string.IsNullOrEmpty(file)&&File.Exists(file)?file:null);
         if(!string.IsNullOrEmpty(file)&&File.Exists(file)){var image=new BitmapImage(new Uri(file));CoverImage.Source=MiniCoverImage.Source=image;try{var f=await StorageFile.GetFileFromPathAsync(file);using var s=await f.OpenReadAsync();var d=await BitmapDecoder.CreateAsync(s);var data=await d.GetPixelDataAsync(BitmapPixelFormat.Rgba8,BitmapAlphaMode.Ignore,new BitmapTransform{ScaledWidth=32,ScaledHeight=32},ExifOrientationMode.IgnoreExifOrientation,ColorManagementMode.DoNotColorManage);var bytes=data.DetachPixelData();long r=0,g=0,b=0;for(int i=0;i<bytes.Length;i+=4){r+=bytes[i];g+=bytes[i+1];b+=bytes[i+2];}int n=bytes.Length/4;Ambient.SetTint(Color.FromArgb(255,(byte)Math.Clamp(r/n,35,180),(byte)Math.Clamp(g/n,35,180),(byte)Math.Clamp(b/n,35,180)));}catch{}}
         else{CoverImage.Source=MiniCoverImage.Source=null;Ambient.SetTint(Color.FromArgb(255,90,129,114));}
+    }
+    // Now 页封面倒影：翻转的封面表面 + 向下渐隐遮罩，纯合成层无额外解码。
+    void AttachReflection(string? coverFile)
+    {
+        try{
+            var host=CoverReflection;
+            if(coverFile==null){Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(host,null);return;}
+            var compositor=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(host).Compositor;
+            var surface=Microsoft.UI.Xaml.Media.LoadedImageSurface.StartLoadFromUri(new Uri(coverFile));
+            var surfaceBrush=compositor.CreateSurfaceBrush(surface);
+            surfaceBrush.Stretch=Microsoft.UI.Composition.CompositionStretch.UniformToFill;
+            surfaceBrush.TransformMatrix=System.Numerics.Matrix3x2.CreateScale(1,-1);
+            var fade=compositor.CreateLinearGradientBrush();
+            fade.StartPoint=new System.Numerics.Vector2(0,0);fade.EndPoint=new System.Numerics.Vector2(0,1);
+            fade.ColorStops.Add(compositor.CreateColorGradientStop(0f,Color.FromArgb(170,255,255,255)));
+            fade.ColorStops.Add(compositor.CreateColorGradientStop(1f,Colors.Transparent));
+            var mask=compositor.CreateMaskBrush();
+            mask.Source=surfaceBrush;mask.Mask=fade;
+            var sprite=compositor.CreateSpriteVisual();
+            sprite.Brush=mask;
+            Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(host,sprite);
+            host.SizeChanged+=(h,_)=>{var b=(Border)h;sprite.Size=new System.Numerics.Vector2((float)b.ActualWidth,(float)b.ActualHeight);};
+            sprite.Size=new System.Numerics.Vector2((float)host.ActualWidth,(float)host.ActualHeight);
+        }catch(Exception e){AppPaths.Log("Reflection: "+e.Message);}
     }
     async Task LoadMedia(Track t,CancellationToken token)
     {
@@ -250,7 +275,9 @@ public sealed partial class MainWindow : Window
     async void Queue_ItemClick(object sender,ItemClickEventArgs e){if(e.ClickedItem is Track t)await Play(t);}
     void QueueUp_Click(object sender,RoutedEventArgs e){int i=QueueList.SelectedIndex;if(i>0){queue.Move(i,i-1);QueueList.SelectedIndex=i-1;}}
     void QueueRemove_Click(object sender,RoutedEventArgs e){int i=QueueList.SelectedIndex;if(i>=0)queue.RemoveAt(i);}
-    void TrackMenu_Click(object sender,RoutedEventArgs e){if(sender is not Button{Tag:Track t} button)return;var menu=new MenuFlyout();var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int index=current==null?-1:queue.ToList().FindIndex(q=>q.Id==current.Id);queue.Insert(Math.Clamp(index+1,0,queue.Count),t);Toast("已加入下一首",t.Title);};menu.Items.Add(next);var sub=new MenuFlyoutSubItem{Text="添加到播放列表"};foreach(var p in library.Playlists()){var item=new MenuFlyoutItem{Text=p.Name};item.Click+=(_,_)=>{library.AddToPlaylist(p.Id,t.Id);Toast("已添加到 "+p.Name);};sub.Items.Add(item);}menu.Items.Add(sub);var locate=new MenuFlyoutItem{Text="在资源管理器中显示"};locate.Click+=(_,_)=>{System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe"){Arguments="/select,\""+t.Path+"\"",UseShellExecute=true});};menu.Items.Add(locate);menu.ShowAt(button);}
+    void TrackMenu_Click(object sender,RoutedEventArgs e){if(sender is not Button{Tag:Track t} button)return;var menu=new MenuFlyout();
+if(playlistFilter is long pid){var rm=new MenuFlyoutItem{Text="从播放列表中移除"};rm.Click+=(_,_)=>{library.RemoveFromPlaylist(pid,t.Id);Filter();Toast("已从播放列表移除",t.Title);};menu.Items.Add(rm);}
+var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int index=current==null?-1:queue.ToList().FindIndex(q=>q.Id==current.Id);queue.Insert(Math.Clamp(index+1,0,queue.Count),t);Toast("已加入下一首",t.Title);};menu.Items.Add(next);var sub=new MenuFlyoutSubItem{Text="添加到播放列表"};foreach(var p in library.Playlists()){var item=new MenuFlyoutItem{Text=p.Name};item.Click+=(_,_)=>{library.AddToPlaylist(p.Id,t.Id);Toast("已添加到 "+p.Name);};sub.Items.Add(item);}menu.Items.Add(sub);var locate=new MenuFlyoutItem{Text="在资源管理器中显示"};locate.Click+=(_,_)=>{System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe"){Arguments="/select,\""+t.Path+"\"",UseShellExecute=true});};menu.Items.Add(locate);menu.ShowAt(button);}
     async void Settings_Click(object sender,RoutedEventArgs e)=>await Settings();
     async Task Settings()
     {
@@ -314,7 +341,7 @@ public sealed partial class MainWindow : Window
         RefreshAsioState();
         if(deviceBox.SelectedItem is AudioDevice d0)LoadProfile(d0);
         var panel=new StackPanel{Spacing=15,Width=470};foreach(var el in new UIElement[]{deviceBox,modeBox,asioHint,asioInstall,asioTarget,dsdBox,dop,rate,downmix,mapping,hint,onlineCheck,themeBox,auroraCheck,motion,closeBehavior,scan,about})panel.Children.Add(el);
-        var dialog=Dialog("播放设置",new ScrollViewer{Content=panel,MaxHeight=530},"保存设置");
+        var dialog=Dialog("设置",new ScrollViewer{Content=panel,MaxHeight=530},"保存设置");
         dialog.PrimaryButtonClick+=async(_,args)=>{
             if(deviceBox.SelectedItem is not AudioDevice d){args.Cancel=true;hint.Text="请选择音频设备。";return;}
             // 后端由设备类型决定：ASIO 驱动恒为 ASIO(2)，WASAPI 设备取共享(0)/独占(1)。
@@ -349,7 +376,7 @@ public sealed partial class MainWindow : Window
     async void FindLyrics_Click(object sender,RoutedEventArgs e)=>await FindLyrics();
     async Task FindLyrics(){
         if(current==null)return;
-        if(!prefs.Online){Toast("联网查找已关闭","可在播放设置中开启。");return;}
+        if(!prefs.Online){Toast("联网查找已关闭","可在设置中开启。");return;}
         var t=current;var token=mediaCancellation.Token;
         var title=new TextBox{Header="歌曲名",Text=t.Title};
         var artist=new TextBox{Header="艺术家",Text=t.Artist};
