@@ -105,6 +105,8 @@ AppWindow.Changed+=(w,a)=>{if(a.DidSizeChange&&(w.Size.Width<1000||w.Size.Height
         ApplyAccent(lastPalette);
     }
     Color[] lastPalette=[];
+    static readonly (string Key,byte Alpha)[] SliderAccentBrushes={("SliderThumbBackground",255),("SliderThumbBackgroundPointerOver",230),("SliderThumbBackgroundPressed",204),("SliderTrackValueFill",235),("SliderTrackValueFillPointerOver",204),("SliderTrackValueFillPressed",153)};
+    void SyncSliderAccent(Color c){foreach(var k in SliderAccentBrushes)if(Application.Current.Resources[k.Key] is SolidColorBrush b)b.Color=Color.FromArgb(k.Alpha,c.R,c.G,c.B);}
     SolidColorBrush AccentBrush()=>AccentDict()["Accent"] as SolidColorBrush ?? new SolidColorBrush(OnAmbient(255));
     ResourceDictionary AccentDict()=>(ResourceDictionary)Application.Current.Resources.ThemeDictionaries[LightTheme?"Light":"Default"];
     // 强调色随封面主色走：浅色主题加深保对比，深色主题提亮保存在感。没有封面时用默认中性色。
@@ -112,10 +114,10 @@ AppWindow.Changed+=(w,a)=>{if(a.DidSizeChange&&(w.Size.Width<1000||w.Size.Height
     {
         lastPalette=palette;
         var dict=AccentDict();
-        if(dict?["Accent"] is not SolidColorBrush brush||palette.Length==0){if(dict?["Accent"] is SolidColorBrush reset)reset.Color=LightTheme?Color.FromArgb(255,51,48,43):Color.FromArgb(255,227,224,213);return;}
+        if(dict?["Accent"] is not SolidColorBrush brush||palette.Length==0){var neutral=LightTheme?Color.FromArgb(255,51,48,43):Color.FromArgb(255,227,224,213);if(dict?["Accent"] is SolidColorBrush reset)reset.Color=neutral;SyncSliderAccent(neutral);return;}
         var c=palette[0];
         var adjusted=LightTheme?Color.FromArgb(255,(byte)(c.R*52/100+28),(byte)(c.G*52/100+28),(byte)(c.B*52/100+28)):Color.FromArgb(255,(byte)(c.R*55/100+118),(byte)(c.G*55/100+118),(byte)(c.B*55/100+118));
-        brush.Color=adjusted;
+        brush.Color=adjusted;SyncSliderAccent(adjusted);
         // 侧栏自取色：轻沾封面主色，玻璃与氛围一体，不再是突兀的白框/黑框。
         if(dict["SidebarBackground"] is AcrylicBrush side){
             var tint=LightTheme?Mix(c,Colors.White,0.74):Mix(c,Colors.Black,0.68);

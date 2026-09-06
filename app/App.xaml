@@ -8,6 +8,10 @@
    <SolidColorBrush x:Key="GlassStroke" Color="#28FFFFFF"/>
    <SolidColorBrush x:Key="GlassFill" Color="#15FFFFFF"/>
    <Style TargetType="Button"><Setter Property="CornerRadius" Value="14"/><Setter Property="Padding" Value="16,10"/><Setter Property="Background" Value="#14FFFFFF"/><Setter Property="BorderBrush" Value="#20FFFFFF"/><Setter Property="BorderThickness" Value="1"/></Style>
+   <!-- 滑杆重皮：去掉默认深色外环（hover 时像黑色方块故障），圆点与进度填充跟随封面强调色（MainWindow.ApplyAccent 同步）。 -->
+   <SolidColorBrush x:Key="SliderOuterThumbBackground" Color="Transparent"/><SolidColorBrush x:Key="SliderThumbBorderBrush" Color="Transparent"/>
+   <SolidColorBrush x:Key="SliderThumbBackground" Color="#E3E0D5"/><SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#CCE3E0D5"/><SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#99E3E0D5"/>
+   <SolidColorBrush x:Key="SliderTrackValueFill" Color="#E5E3E0D5"/><SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#CCE3E0D5"/><SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#99E3E0D5"/>
    <Style x:Key="QuietButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="12"/></Style>
    <Style x:Key="NavButton" TargetType="Button" BasedOn="{StaticResource QuietButton}"><Setter Property="HorizontalAlignment" Value="Stretch"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Padding" Value="18,14"/><Setter Property="Margin" Value="0,3"/></Style>
   </ResourceDictionary>
