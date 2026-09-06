@@ -11,10 +11,17 @@ public static class FlexAsioConfig
     // 当前 toml 是否定向到了具体设备（失败重试判断用）
     public static bool Targeted;
 
-    public static string Build(string? target)=>string.IsNullOrEmpty(target)
-        ?"backend = \"Windows WASAPI\"\n\n[output]\nwasapiExclusiveMode = true\n"
+    // dop=true 时强制 24 位容器：FlexASIO 默认按设备默认格式打开（可能是 Int32），DoP-32 部分 DAC 不认。
+    // 独占模式下 WASAPI 从不转换采样率，rate 由播放引擎经 ASIO 正常驱动，故不锁 sampleRate。
+    public static string Build(string? target,bool dop=false)
+    {
+        string output=dop
+            ?"[output]\nwasapiExclusiveMode = true\nsampleType = \"Int24\"\n"
+            :"[output]\nwasapiExclusiveMode = true\n";
+        string head="backend = \"Windows WASAPI\"\n\n"+output;
         // TOML 字符串转义（设备名可能含引号/反斜杠的情况极少，防御性处理）
-        :$"backend = \"Windows WASAPI\"\n\n[output]\nwasapiExclusiveMode = true\ndevice = \"{target.Replace("\\","\\\\").Replace("\"","\\\"")}\"\n";
+        return string.IsNullOrEmpty(target)?head:head+$"device = \"{target.Replace("\\","\\\\").Replace("\"","\\\"")}\"\n";
+    }
 
     // 内容不变则不写，避免触发 FlexASIO 的配置热重载打断播放
     public static void Ensure(string toml)

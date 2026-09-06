@@ -30,7 +30,8 @@ public sealed class AudioService : IDisposable
             }
             if(profile.Backend==2&&device.Name==AsioSetup.DriverName)
             {
-                FlexAsioTarget(profile);
+                bool dop=track.Format is "DSF" or "DFF" or "ISO"&&profile.DsdMode==1;
+                FlexAsioTarget(profile,dop);
                 try{await Start();}
                 catch(InvalidOperationException)when(FlexAsioConfig.Targeted){
                     // 目标设备名失配或被占用：回退 Windows 默认输出重试一次
@@ -43,14 +44,14 @@ public sealed class AudioService : IDisposable
         }finally{Busy=false;serial.Release();}
     }
     // FlexASIO 不指向具体硬件，按档案里的目标端点 ID 解析设备名写入其配置；ID 失效时退回记录名
-    void FlexAsioTarget(DeviceProfile profile)
+    void FlexAsioTarget(DeviceProfile profile,bool dop=false)
     {
         string? target=null;
         var match=Devices().FirstOrDefault(d=>d.Backend==1&&d.Id==profile.AsioTargetId);
         if(match!=null)target=match.Name;
         else if(!string.IsNullOrEmpty(profile.AsioTargetName)){target=profile.AsioTargetName;FlexAsioConfig.LastWarning="ASIO 目标设备当前不在线，尝试按名称定位。";}
         FlexAsioConfig.Targeted=!string.IsNullOrEmpty(target);
-        FlexAsioConfig.Ensure(FlexAsioConfig.Build(target));
+        FlexAsioConfig.Ensure(FlexAsioConfig.Build(target,dop));
     }
     public void Pause(bool pause){if(!Busy&&luma_pause(pause?1:0)==0)throw new InvalidOperationException(Error());}
     public void Volume(float volume){if(!Busy)luma_volume(volume);}

@@ -51,8 +51,7 @@ public sealed partial class MainWindow : Window
         SeekSlider.AddHandler(UIElement.PointerPressedEvent,new PointerEventHandler((_,_)=>{seeking=true;seekTimer.Stop();}),true);
         SeekSlider.AddHandler(UIElement.PointerReleasedEvent,new PointerEventHandler(async(_,_)=>{if(seeking){seeking=false;seekTimer.Stop();await SeekTo(SeekSlider.Value);}}),true);
         SeekSlider.AddHandler(UIElement.PointerCanceledEvent,new PointerEventHandler((_,_)=>{seeking=false;seekTimer.Stop();}),true);
-        Closed+=async(_,_)=>{closing=true;timer.Stop();seekTimer.Stop();searchTimer.Stop();mediaCancellation.Cancel();scanCancellation?.Cancel();prefs.LastTrack=current?.Id??"";prefs.LastPosition=lastState.Position;prefs.Queue=queue.Select(t=>t.Id).ToList();AppPaths.Save(prefs);if(audio!=null){await audio.Stop();audio.Dispose();}Field.Pause(true);};
-        AppWindow.Changed+=(_,_)=>{if(AppWindow.Presenter is OverlappedPresenter p)Field.Pause(p.State==OverlappedPresenterState.Minimized||nowVisible);};
+        Closed+=async(_,_)=>{closing=true;timer.Stop();seekTimer.Stop();searchTimer.Stop();mediaCancellation.Cancel();scanCancellation?.Cancel();prefs.LastTrack=current?.Id??"";prefs.LastPosition=lastState.Position;prefs.Queue=queue.Select(t=>t.Id).ToList();AppPaths.Save(prefs);if(audio!=null){await audio.Stop();audio.Dispose();}};
     }
     async void Loaded(object sender,RoutedEventArgs e)
     {
@@ -60,7 +59,7 @@ public sealed partial class MainWindow : Window
         try{audio=new AudioService();devices=audio.Devices();if(Device==null){var d=devices.FirstOrDefault(x=>x.Default)??devices.FirstOrDefault();if(d!=null){prefs.DeviceId=d.Id;prefs.DeviceBackend=d.Backend;}}}
         catch(Exception ex){Toast("音频引擎无法启动",ex.Message,true);}
         tracks=await Task.Run(library.Load);foreach(var id in prefs.Queue){var t=tracks.FirstOrDefault(t=>t.Id==id);if(t!=null)queue.Add(t);}
-        VolumeSlider.Value=prefs.Volume*100;Field.Reduced=Ambient.Reduced=prefs.ReducedMotion;
+        VolumeSlider.Value=prefs.Volume*100;Ambient.Reduced=prefs.ReducedMotion;
         ready=true;Filter();RefreshPlaylists();SetModeIcons();timer.Start();
         if(tracks.FirstOrDefault(t=>t.Id==prefs.LastTrack) is {} last){current=last;await ShowTrack(last);}
         var arguments=Environment.GetCommandLineArgs().Skip(1).Where(File.Exists).ToList();if(arguments.Count>0)await Import(arguments);
@@ -86,10 +85,10 @@ public sealed partial class MainWindow : Window
     }
     void Animate(UIElement element){if(prefs.ReducedMotion)return;var v=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element);var c=v.Compositor;var fade=c.CreateScalarKeyFrameAnimation();fade.InsertKeyFrame(0,0);fade.InsertKeyFrame(1,1);fade.Duration=TimeSpan.FromMilliseconds(300);v.StartAnimation("Opacity",fade);var slide=c.CreateVector3KeyFrameAnimation();slide.InsertKeyFrame(0,new(0,12,0));slide.InsertKeyFrame(1,Vector3.Zero);slide.Duration=TimeSpan.FromMilliseconds(350);Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetIsTranslationEnabled(element,true);v.StartAnimation("Translation",slide);}
     void Fade(UIElement element,bool show){var v=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element);float to=show?1:0;if(prefs.ReducedMotion){v.StopAnimation("Opacity");v.Opacity=to;return;}var c=v.Compositor;var anim=c.CreateScalarKeyFrameAnimation();anim.InsertKeyFrame(0,v.Opacity);anim.InsertKeyFrame(1,to);anim.Duration=TimeSpan.FromMilliseconds(650);v.StartAnimation("Opacity",anim);}
-    void ShowLibrary(){nowVisible=false;NowPage.Visibility=Visibility.Collapsed;LibraryPage.Visibility=Visibility.Visible;QueuePanel.Visibility=Visibility.Collapsed;Field.Pause(false);Fade(Ambient,false);Animate(LibraryPage);}
+    void ShowLibrary(){nowVisible=false;NowPage.Visibility=Visibility.Collapsed;LibraryPage.Visibility=Visibility.Visible;QueuePanel.Visibility=Visibility.Collapsed;Animate(LibraryPage);}
     void Library_Click(object sender,RoutedEventArgs e){favoritesOnly=false;albumFilter=null;artistFilter=null;playlistFilter=null;PageTitle.Text="音乐库";ShowLibrary();Filter();}
     void Favorites_Click(object sender,RoutedEventArgs e){favoritesOnly=true;albumFilter=null;artistFilter=null;playlistFilter=null;PageTitle.Text="我的收藏";ShowLibrary();Filter();}
-    void Now_Click(object sender,RoutedEventArgs e){if(nowVisible)return;ConnectedAnimation? animation=null;if(!prefs.ReducedMotion&&current!=null)animation=ConnectedAnimationService.GetForCurrentView().PrepareToAnimate("cover",MiniCover);nowVisible=true;LibraryPage.Visibility=Visibility.Collapsed;NowPage.Visibility=Visibility.Visible;Ambient.Visibility=Visibility.Visible;Field.Pause(true);Fade(Ambient,true);NowPage.UpdateLayout();Animate(NowPage);animation?.TryStart(LargeCover);}
+    void Now_Click(object sender,RoutedEventArgs e){if(nowVisible)return;ConnectedAnimation? animation=null;if(!prefs.ReducedMotion&&current!=null)animation=ConnectedAnimationService.GetForCurrentView().PrepareToAnimate("cover",MiniCover);nowVisible=true;LibraryPage.Visibility=Visibility.Collapsed;NowPage.Visibility=Visibility.Visible;NowPage.UpdateLayout();Animate(NowPage);animation?.TryStart(LargeCover);}
     void SongsTab_Click(object sender,RoutedEventArgs e){showAlbums=false;Filter();}
     void AlbumsTab_Click(object sender,RoutedEventArgs e){showAlbums=true;Filter();}
     void Search_Changed(AutoSuggestBox sender,AutoSuggestBoxTextChangedEventArgs args){searchTimer.Stop();searchTimer.Start();}
@@ -110,7 +109,9 @@ public sealed partial class MainWindow : Window
         int generation=++playGeneration;await playGate.WaitAsync();
         try{
             if(generation!=playGeneration)return;SetBusy(true);Notice.IsOpen=false;endSeen=DateTime.MinValue;
-            await audio.Open(track,Device,prefs.Profile,prefs.Volume,position);
+            // 历史档案可能给 WASAPI 设备存过 ASIO 后端，播放前按设备实际类型纠正。
+            var profile=prefs.Profile;if(Device.Backend!=2&&profile.Backend==2)profile.Backend=Device.Backend;
+            await audio.Open(track,Device,profile,prefs.Volume,position);
             if(FlexAsioConfig.LastWarning.Length>0)Toast("ASIO 提示",FlexAsioConfig.LastWarning);
             current=track;lastState=audio.State();prefs.LastTrack=track.Id;
             if(!queue.Any(t=>t.Id==track.Id))queue.Add(track);
@@ -127,8 +128,8 @@ public sealed partial class MainWindow : Window
     async Task SetCover(string file)
     {
         Ambient.SetSource(!string.IsNullOrEmpty(file)&&File.Exists(file)?file:null);
-        if(!string.IsNullOrEmpty(file)&&File.Exists(file)){var image=new BitmapImage(new Uri(file));CoverImage.Source=MiniCoverImage.Source=image;try{var f=await StorageFile.GetFileFromPathAsync(file);using var s=await f.OpenReadAsync();var d=await BitmapDecoder.CreateAsync(s);var data=await d.GetPixelDataAsync(BitmapPixelFormat.Rgba8,BitmapAlphaMode.Ignore,new BitmapTransform{ScaledWidth=32,ScaledHeight=32},ExifOrientationMode.IgnoreExifOrientation,ColorManagementMode.DoNotColorManage);var bytes=data.DetachPixelData();long r=0,g=0,b=0;for(int i=0;i<bytes.Length;i+=4){r+=bytes[i];g+=bytes[i+1];b+=bytes[i+2];}int n=bytes.Length/4;var ambient=Color.FromArgb(255,(byte)Math.Clamp(r/n,35,180),(byte)Math.Clamp(g/n,35,180),(byte)Math.Clamp(b/n,35,180));Field.SetColor(ambient);Ambient.SetTint(ambient);}catch{}}
-        else{CoverImage.Source=MiniCoverImage.Source=null;var ambient=Color.FromArgb(255,90,129,114);Field.SetColor(ambient);Ambient.SetTint(ambient);}
+        if(!string.IsNullOrEmpty(file)&&File.Exists(file)){var image=new BitmapImage(new Uri(file));CoverImage.Source=MiniCoverImage.Source=image;try{var f=await StorageFile.GetFileFromPathAsync(file);using var s=await f.OpenReadAsync();var d=await BitmapDecoder.CreateAsync(s);var data=await d.GetPixelDataAsync(BitmapPixelFormat.Rgba8,BitmapAlphaMode.Ignore,new BitmapTransform{ScaledWidth=32,ScaledHeight=32},ExifOrientationMode.IgnoreExifOrientation,ColorManagementMode.DoNotColorManage);var bytes=data.DetachPixelData();long r=0,g=0,b=0;for(int i=0;i<bytes.Length;i+=4){r+=bytes[i];g+=bytes[i+1];b+=bytes[i+2];}int n=bytes.Length/4;Ambient.SetTint(Color.FromArgb(255,(byte)Math.Clamp(r/n,35,180),(byte)Math.Clamp(g/n,35,180),(byte)Math.Clamp(b/n,35,180)));}catch{}}
+        else{CoverImage.Source=MiniCoverImage.Source=null;Ambient.SetTint(Color.FromArgb(255,90,129,114));}
     }
     async Task LoadMedia(Track t,CancellationToken token)
     {
@@ -181,7 +182,7 @@ public sealed partial class MainWindow : Window
     {
         if(audio==null)return;if(audio.Busy){Toast("正在切换音频，请稍候");return;}devices=audio.Devices();
         var deviceBox=new ComboBox{Header="输出设备",ItemsSource=devices,SelectedItem=Device??devices.FirstOrDefault(),HorizontalAlignment=HorizontalAlignment.Stretch};
-        var modeBox=new ComboBox{Header="输出方式",ItemsSource=new[]{"WASAPI 共享","WASAPI 独占","ASIO"},SelectedIndex=prefs.Profile.Backend,HorizontalAlignment=HorizontalAlignment.Stretch};
+        var modeBox=new ComboBox{Header="输出方式",HorizontalAlignment=HorizontalAlignment.Stretch};
         // 开箱即用的 ASIO：系统无任何 ASIO 驱动时，提供随包分发的 FlexASIO 一键安装（GPL，见 THIRD-PARTY-NOTICES.md）
         var asioHint=new TextBlock{FontSize=11,TextWrapping=TextWrapping.Wrap,Foreground=Brush(200,172,194,176),Visibility=Visibility.Collapsed};
         var asioInstall=new Button{Content="一键安装 FlexASIO 通用驱动（WASAPI 独占，需管理员确认）",HorizontalAlignment=HorizontalAlignment.Left,Visibility=Visibility.Collapsed};
@@ -196,10 +197,16 @@ public sealed partial class MainWindow : Window
         var motion=new ToggleSwitch{Header="减少动态效果",IsOn=prefs.ReducedMotion,OnContent="开启",OffContent="关闭"};
         var hint=new TextBlock{Text="独占模式会占用所选设备。DSD 透传时软件音量不可用，请使用 DAC 控制音量。",TextWrapping=TextWrapping.Wrap,FontSize=11,Foreground=Brush(200,172,194,176)};
         var scan=new Button{Content="重新扫描已添加的音乐文件夹"};scan.Click+=async(_,_)=>await Import(prefs.Roots);
-        void LoadProfile(AudioDevice d){var key=$"{d.Backend}:{d.Id}";var p=prefs.Profiles.TryGetValue(key,out var profile)?profile:new DeviceProfile{Backend=d.Backend};modeBox.SelectedIndex=p.Backend;dsdBox.SelectedIndex=p.DsdMode;dop.IsChecked=p.DopConfirmed;downmix.IsChecked=p.Downmix;rate.SelectedIndex=Math.Max(0,Array.IndexOf(rates,p.ForceRate));mapping.Text=string.Join(", ",p.Mapping.Select(i=>i+1));asioTarget.Visibility=d.Name==AsioSetup.DriverName?Visibility.Visible:Visibility.Collapsed;asioTarget.SelectedValue=p.AsioTargetId;}
+        void LoadProfile(AudioDevice d){
+            var key=$"{d.Backend}:{d.Id}";var p=prefs.Profiles.TryGetValue(key,out var profile)?profile:new DeviceProfile{Backend=d.Backend};
+            // 输出方式跟随设备类型：WASAPI 设备只有共享/独占，ASIO 驱动只有 ASIO，两者不可交叉。
+            modeBox.ItemsSource=d.Backend==2?new object[]{"ASIO"}:new object[]{"WASAPI 共享","WASAPI 独占"};
+            modeBox.SelectedIndex=d.Backend==2?0:Math.Clamp(p.Backend,0,1);
+            dsdBox.SelectedIndex=p.DsdMode;dop.IsChecked=p.DopConfirmed;downmix.IsChecked=p.Downmix;rate.SelectedIndex=Math.Max(0,Array.IndexOf(rates,p.ForceRate));mapping.Text=string.Join(", ",p.Mapping.Select(i=>i+1));asioTarget.Visibility=d.Name==AsioSetup.DriverName?Visibility.Visible:Visibility.Collapsed;asioTarget.SelectedValue=p.AsioTargetId;
+        }
         deviceBox.SelectionChanged+=(_,_)=>{if(deviceBox.SelectedItem is AudioDevice d)LoadProfile(d);};
-        void RefreshAsioState(){bool show=modeBox.SelectedIndex==2&&!devices.Any(d=>d.Backend==2);asioHint.Text=show?"未检测到系统中的 ASIO 驱动。可一键安装随应用附带的 FlexASIO 通用驱动（GPL 开源），安装后即以 ASIO 独占方式输出。":"";asioHint.Visibility=asioInstall.Visibility=show?Visibility.Visible:Visibility.Collapsed;}
-        modeBox.SelectionChanged+=(_,_)=>RefreshAsioState();
+        // 是否提供 FlexASIO 一键安装只看系统里有没有 ASIO 驱动，与输出方式无关。
+        void RefreshAsioState(){bool show=!devices.Any(d=>d.Backend==2);asioHint.Text=show?"未检测到系统中的 ASIO 驱动。如需以 ASIO 独占方式输出（FlexASIO 可定向到指定设备），可一键安装随应用附带的 FlexASIO 通用驱动（GPL 开源）。":"";asioHint.Visibility=asioInstall.Visibility=show?Visibility.Visible:Visibility.Collapsed;}
         asioInstall.Click+=async(_,_)=>{
             asioInstall.IsEnabled=false;asioHint.Text="正在安装 FlexASIO 驱动…请在弹出的管理员授权窗口选择“是”。";
             try{
@@ -212,23 +219,31 @@ public sealed partial class MainWindow : Window
             finally{asioInstall.IsEnabled=true;}
         };
         RefreshAsioState();
-        if(deviceBox.SelectedItem is AudioDevice d0){asioTarget.Visibility=d0.Name==AsioSetup.DriverName?Visibility.Visible:Visibility.Collapsed;asioTarget.SelectedValue=prefs.Profile.AsioTargetId;}
+        if(deviceBox.SelectedItem is AudioDevice d0)LoadProfile(d0);
         var panel=new StackPanel{Spacing=15,Width=470};foreach(var el in new UIElement[]{deviceBox,modeBox,asioHint,asioInstall,asioTarget,dsdBox,dop,rate,downmix,mapping,hint,onlineCheck,motion,scan})panel.Children.Add(el);
         var dialog=Dialog("播放设置",new ScrollViewer{Content=panel,MaxHeight=530},"保存设置");
         dialog.PrimaryButtonClick+=(_,args)=>{
             if(deviceBox.SelectedItem is not AudioDevice d){args.Cancel=true;hint.Text="请选择音频设备。";return;}
-            if((d.Backend==2)!=(modeBox.SelectedIndex==2)){args.Cancel=true;hint.Text="ASIO 驱动必须搭配 ASIO 输出；WASAPI 设备请选择共享或独占。";return;}
+            // 后端由设备类型决定：ASIO 驱动恒为 ASIO(2)，WASAPI 设备取共享(0)/独占(1)。
+            int backend=d.Backend==2?2:Math.Clamp(modeBox.SelectedIndex,0,1);
             if(dsdBox.SelectedIndex==1&&dop.IsChecked!=true){args.Cancel=true;hint.Text="启用 DoP 前需要确认设备支持。";return;}
             if(dsdBox.SelectedIndex==2&&d.Backend!=2){args.Cancel=true;hint.Text="原生 DSD 需要选择 ASIO 驱动。";return;}
-            if(dsdBox.SelectedIndex==1&&modeBox.SelectedIndex==0){args.Cancel=true;hint.Text="DoP 不能通过共享模式播放。";return;}
+            if(dsdBox.SelectedIndex==1&&backend==0){args.Cancel=true;hint.Text="DoP 不能通过共享模式播放。";return;}
             try{var map=mapping.Text.Split(',',StringSplitOptions.TrimEntries).Select(int.Parse).Select(i=>i-1).ToArray();if(map.Length!=8||map.Any(i=>i<0)||map.Distinct().Count()!=8)throw new FormatException();
                 string atId="",atName="";
                 if(d.Name==AsioSetup.DriverName&&asioTarget.SelectedItem is AudioDevice t&&t.Index>=0){atId=t.Id;atName=t.Name;}
-                prefs.DeviceId=d.Id;prefs.DeviceBackend=d.Backend;prefs.Profiles[$"{d.Backend}:{d.Id}"]=new(){Backend=modeBox.SelectedIndex,DsdMode=dsdBox.SelectedIndex,DopConfirmed=dop.IsChecked==true,ForceRate=rates[rate.SelectedIndex],Downmix=downmix.IsChecked==true,Mapping=map,AsioTargetId=atId,AsioTargetName=atName};
-                prefs.Online=onlineCheck.IsOn;prefs.ReducedMotion=motion.IsOn;Field.Reduced=Ambient.Reduced=prefs.ReducedMotion;AppPaths.Save(prefs);
+                prefs.DeviceId=d.Id;prefs.DeviceBackend=d.Backend;prefs.Profiles[$"{d.Backend}:{d.Id}"]=new(){Backend=backend,DsdMode=dsdBox.SelectedIndex,DopConfirmed=dop.IsChecked==true,ForceRate=rates[rate.SelectedIndex],Downmix=downmix.IsChecked==true,Mapping=map,AsioTargetId=atId,AsioTargetName=atName};
+                prefs.Online=onlineCheck.IsOn;prefs.ReducedMotion=motion.IsOn;Ambient.Reduced=prefs.ReducedMotion;AppPaths.Save(prefs);
             }catch{args.Cancel=true;hint.Text="请输入 8 个不同的正整数作为通道映射。";}
         };
-        if(await dialog.ShowAsync()==ContentDialogResult.Primary){bool resume=lastState.Playing;double position=lastState.Position;if(current!=null&&lastState.Duration>0){await Play(current,position);if(!resume)audio.Pause(true);}Toast("输出设置已保存",Device?.Name??"");}
+        if(await dialog.ShowAsync()==ContentDialogResult.Primary){
+            bool resume=lastState.Playing;double position=lastState.Position;
+            if(current!=null&&lastState.Duration>0){
+                await Play(current,position);
+                if(!resume){try{audio.Pause(true);}catch(Exception ex){AppPaths.Log("设置保存后暂停: "+ex.Message);Toast("已保存","当前曲目恢复播放时请确认 DSD 播放方式");}}
+            }
+            Toast("输出设置已保存",Device?.Name??"");
+        }
     }
     void LyricsMenu_Click(object sender,RoutedEventArgs e){var fly=new MenuFlyout();foreach(var option in new[]{"联网查找歌词","联网选择封面","导入本地 LRC","选择本地封面","调整歌词时间"}){var item=new MenuFlyoutItem{Text=option};item.Click+=async(_,_)=>{if(current==null)return;switch(option){case "联网查找歌词":await FindLyrics();break;case "联网选择封面":await FindCover();break;case "导入本地 LRC":await PickLyrics();break;case "选择本地封面":await PickCover();break;case "调整歌词时间":await AdjustLyrics();break;}};fly.Items.Add(item);}fly.ShowAt((FrameworkElement)sender);}
     async void FindLyrics_Click(object sender,RoutedEventArgs e)=>await FindLyrics();

@@ -46,3 +46,4 @@ native/  C++ 音频引擎
 
 - 本项目为个人项目，仅供学习交流；BASS 库版权归 [un4seen](https://www.un4seen.com/) 所有，由构建脚本从官方下载，本仓库不包含其任何文件。第三方组件详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 - ASIO 输出开箱即用：系统没有任何 ASIO 驱动时，在「播放设置」选择 ASIO 输出方式，点击"一键安装 FlexASIO 通用驱动"（需一次管理员确认），安装后自动以 WASAPI 独占方式输出。若 DAC 有厂商 ASIO 驱动（支持原生 DSD），优先使用厂商驱动。
+- DoP 透传需要 24 位输出路径：本应用在 FlexASIO 上会自动强制 24 位容器；ASIO4ALL 若与设备协商成 16 位会截断 DoP 产生噪声，此类情况请改用厂商 ASIO 或 FlexASIO。

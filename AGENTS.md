@@ -49,4 +49,5 @@ powershell scripts/build.ps1         # 应用构建（bundled dotnet，环境变
 ## 协作约定
 
 - 提交信息用中文祈使句，小步提交
+- **推送到远端必须由用户手动控制**：agent 只做本地 commit，`git push` / 强推 / 删除远端分支等任何上远端的动作都要先征得用户明确同意；完成后注明"已提交未推送"
 - 多智能体并行开发用分支或 `git worktree` 隔离；不要并发写同一个 `build/ui-test-profile`

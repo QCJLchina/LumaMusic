@@ -1,80 +1,89 @@
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Brushes;
 using Microsoft.Graphics.Canvas.Effects;
-using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
 using System.Numerics;
+using System.Security.Cryptography;
+using System.Text;
 using Windows.Foundation;
+using Windows.Graphics.Imaging;
 using Windows.UI;
 namespace LumaMusic.Controls;
-// 沉浸式背景：专辑封面高斯模糊铺满整个窗口，切歌时交叉淡化，静止后自动休眠。
-// 封面位图延迟到首次绘制时才加载——控件折叠期间创建资源会静默失败。
-public sealed class AmbientBackdrop : Microsoft.UI.Xaml.Controls.UserControl
+// 全局氛围背景：封面离线渲染成「高斯模糊+饱和+压暗」的 PNG（按内容缓存），
+// 用普通 Image 层展示而不是交换链——这样页面上所有 AcrylicBrush 都能真实采样到背景，玻璃效果才成立。
+public sealed class AmbientBackdrop : UserControl
 {
-    public volatile bool Reduced;
-    readonly CanvasAnimatedControl canvas=new(){Paused=true};
-    CanvasBitmap? current,next;float blend=1;Color tint=Color.FromArgb(255,90,129,114);
-    string? pending;bool hasPending,loading;
-    public AmbientBackdrop(){Content=canvas;canvas.Draw+=Draw;canvas.Unloaded+=(_,_)=>canvas.Paused=true;}
-    public void SetTint(Color c)=>tint=c;
-    public void SetSource(string? path){pending=path;hasPending=true;canvas.Paused=false;}
-    void StartLoad(ICanvasAnimatedControl sender,string? path)
+    public bool Reduced {get;set;}
+    static readonly SemaphoreSlim genGate=new(1,1);
+    readonly Grid root=new();
+    readonly Image shown=new(){Stretch=Stretch.UniformToFill};
+    readonly Image entering=new(){Stretch=Stretch.UniformToFill,Opacity=0};
+    string? lastPath;
+    public AmbientBackdrop(){Content=root;root.Children.Add(shown);root.Children.Add(entering);}
+    // 无封面时的占位：按封面平均色调的深色渐变。
+    public void SetTint(Color c)=>root.Background=new LinearGradientBrush{StartPoint=new Point(0,0),EndPoint=new Point(0,1),GradientStops=new GradientStopCollection{
+        new GradientStop{Offset=0,Color=Color.FromArgb(255,(byte)(c.R*38/100),(byte)(c.G*38/100),(byte)(c.B*38/100))},
+        new GradientStop{Offset=1,Color=Color.FromArgb(255,11,17,15)}}};
+    public void SetSource(string? path){if(path!=lastPath){lastPath=path;_=Load(path);}}
+    async Task Load(string? path)
     {
-        _=LoadAsync(sender,path);
-        async Task LoadAsync(ICanvasAnimatedControl s,string? p)
-        {
-            CanvasBitmap? bmp=null;
-            try{
-                if(p!=null&&File.Exists(p)){
-                    try{bmp=await CanvasBitmap.LoadAsync(s,p);}
-                    catch{using var ms=new MemoryStream(await File.ReadAllBytesAsync(p));using var ras=ms.AsRandomAccessStream();bmp=await CanvasBitmap.LoadAsync(s,ras);}
-                }
-            }catch(Exception e){Services.AppPaths.Log("Ambient load: "+e.Message);}
-            DispatcherQueue.TryEnqueue(()=>{
-                loading=false;
-                if(Reduced||current==null){current=bmp;next=null;blend=1;}
-                else{next=bmp;blend=0;}
-            });
-        }
+        string? file=null;
+        try{if(!string.IsNullOrEmpty(path)&&File.Exists(path))file=await RenderBlurredAsync(path);}
+        catch(Exception e){Services.AppPaths.Log("Ambient: "+e.Message);}
+        if(file==null){shown.Source=null;entering.Source=null;return;}
+        ImageSource src=new BitmapImage(new Uri(file));
+        if(Reduced){shown.Source=src;entering.Opacity=0;return;}
+        entering.Source=src;
+        var sb=new Storyboard();
+        var anim=new DoubleAnimation{From=0,To=1,Duration=new Duration(TimeSpan.FromMilliseconds(750)),EasingFunction=new QuadraticEase{EasingMode=EasingMode.EaseOut}};
+        Storyboard.SetTarget(anim,entering);Storyboard.SetTargetProperty(anim,"Opacity");
+        sb.Children.Add(anim);
+        sb.Completed+=(_,_)=>{shown.Source=entering.Source;entering.Source=null;entering.Opacity=0;};
+        sb.Begin();
     }
-    void Draw(ICanvasAnimatedControl sender,CanvasAnimatedDrawEventArgs args)
+    static async Task<string?> RenderBlurredAsync(string coverPath)
     {
-        var d=args.DrawingSession;float w=(float)sender.Size.Width,h=(float)sender.Size.Height;if(w<=0||h<=0){canvas.Paused=true;return;}
-        d.Clear(Color.FromArgb(255,10,15,14));
-        if(!loading&&hasPending){hasPending=false;loading=true;StartLoad(sender,pending);}
-        if(loading||hasPending){
-            if(current!=null)Layer(d,current,1,w,h);else Placeholder(d,w,h);
-        }else if(next==null){
-            if(current!=null)Layer(d,current,1,w,h);else Placeholder(d,w,h);
-            canvas.Paused=true;return;
-        }else{
-            if(current!=null)Layer(d,current,1,w,h);
-            blend+=(float)args.Timing.ElapsedTime.TotalSeconds*1.6f;
-            if(blend>=1){current=next;next=null;blend=1;Layer(d,current,1,w,h);}
-            else Layer(d,next,blend*blend*(3-2*blend),w,h);
-        }
-        d.FillRectangle(0,0,w,h,Color.FromArgb(52,6,10,9));
-        using var shade=new CanvasLinearGradientBrush(sender,new[]{
-            new CanvasGradientStop{Position=0,Color=Color.FromArgb(150,6,10,9)},
-            new CanvasGradientStop{Position=.45f,Color=Color.FromArgb(96,6,10,9)},
-            new CanvasGradientStop{Position=1,Color=Color.FromArgb(185,4,8,7)}}){StartPoint=new Vector2(0,0),EndPoint=new Vector2(0,h)};
-        d.FillRectangle(0,0,w,h,shade);
-    }
-    void Placeholder(CanvasDrawingSession d,float w,float h)
-    {
-        float r=MathF.Max(w,h)*.95f;
-        using var brush=new CanvasRadialGradientBrush(canvas,Color.FromArgb(200,40,62,52),Color.FromArgb(255,12,20,18)){Center=new Vector2(w*.32f,h*.42f),RadiusX=r,RadiusY=r};
-        d.FillRectangle(0,0,w,h,brush);
-        d.FillRectangle(0,0,w,h,Color.FromArgb(34,tint.R,tint.G,tint.B));
-    }
-    static void Layer(CanvasDrawingSession d,CanvasBitmap bmp,float alpha,float w,float h)
-    {
-        if(alpha<=0.004f)return;
-        float iw=(float)bmp.Size.Width,ih=(float)bmp.Size.Height;if(iw<1||ih<1)return;
-        // 放大 1.3 倍再铺满，让模糊采样不露出边缘。
-        float scale=MathF.Max(w/iw,h/ih)*1.3f;
-        using var blur=new GaussianBlurEffect{Source=bmp,BlurAmount=MathF.Max(60,w*.085f),BorderMode=EffectBorderMode.Hard,Optimization=EffectOptimization.Balanced};
-        using var sat=new SaturationEffect{Source=blur,Saturation=1.15f};
-        d.DrawImage(sat,new Rect((w-iw*scale)/2f,(h-ih*scale)/2f,iw*scale,ih*scale),new Rect(0,0,iw,ih),alpha*.82f);
+        var key=Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(coverPath.ToLowerInvariant())))[..16].ToLowerInvariant();
+        var outFile=System.IO.Path.Combine(Services.AppPaths.Cache,"ambient-"+key+".png");
+        if(File.Exists(outFile))return outFile;
+        await genGate.WaitAsync();
+        try{
+            if(File.Exists(outFile))return outFile;
+            var device=CanvasDevice.GetSharedDevice();
+            using var bmp=await CanvasBitmap.LoadAsync(device,coverPath);
+            float w=1920,h=1200;
+            using var target=new CanvasRenderTarget(device,w,h,96);
+            using(var ds=target.CreateDrawingSession()){
+                ds.Clear(Color.FromArgb(255,12,18,16));
+                float iw=(float)bmp.Size.Width,ih=(float)bmp.Size.Height;
+                // 放大 1.25 倍铺满，模糊采样不露边缘。
+                float scale=MathF.Max(w/iw,h/ih)*1.25f;
+                using var blur=new GaussianBlurEffect{Source=bmp,BlurAmount=MathF.Max(70,w*.06f),BorderMode=EffectBorderMode.Hard,Optimization=EffectOptimization.Balanced};
+                using var sat=new SaturationEffect{Source=blur,Saturation=1.18f};
+                ds.DrawImage(sat,new Rect((w-iw*scale)/2f,(h-ih*scale)/2f,iw*scale,ih*scale),new Rect(0,0,iw,ih),0.85f);
+                // 压暗直接烘进图里：顶部保标题、中部适中、底部最深保播放条对比度。
+                using var shade=new CanvasLinearGradientBrush(device,new[]{
+                    new CanvasGradientStop{Position=0,Color=Color.FromArgb(140,6,10,9)},
+                    new CanvasGradientStop{Position=.45f,Color=Color.FromArgb(88,6,10,9)},
+                    new CanvasGradientStop{Position=1,Color=Color.FromArgb(175,4,8,7)}}){StartPoint=new Vector2(0,0),EndPoint=new Vector2(0,h)};
+                ds.FillRectangle(0,0,w,h,shade);
+            }
+            var pixels=target.GetPixelBytes();
+            using var ras=new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            var encoder=await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId,ras);
+            encoder.SetPixelData(BitmapPixelFormat.Bgra8,BitmapAlphaMode.Ignore,(uint)w,(uint)h,96,96,pixels);
+            await encoder.FlushAsync();
+            var size=(uint)ras.Size;
+            using var reader=new Windows.Storage.Streams.DataReader(ras.GetInputStreamAt(0));
+            await reader.LoadAsync(size);
+            var png=new byte[size];reader.ReadBytes(png);
+            File.WriteAllBytes(outFile,png);
+            return outFile;
+        }catch(Exception e){Services.AppPaths.Log("Ambient render: "+e.Message);return null;}
+        finally{genGate.Release();}
     }
 }
