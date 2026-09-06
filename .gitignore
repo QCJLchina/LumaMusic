@@ -8,3 +8,4 @@ dist/
 **/obj/
 .vs/
 *.user
+__pycache__/
