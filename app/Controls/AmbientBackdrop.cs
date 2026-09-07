@@ -19,31 +19,43 @@ namespace LumaMusic.Controls;
 // 可选流光层：从封面提取的 3 个主色做成漂移色斑（XAML 层，同样可被玻璃采样）。
 public sealed class AmbientBackdrop : UserControl
 {
-    public bool Reduced {get;set;}
+    bool reduced;
+    public bool Reduced {get=>reduced;set{reduced=value;if(value){transition?.Stop();if(entering.Source!=null){shown.Source=entering.Source;entering.Source=null;}entering.Opacity=0;}ApplyAurora();}}
+    public bool Active {get;private set;}=true;
+    public void SetActive(bool active){Active=active;if(!active){transition?.Stop();if(entering.Source!=null){shown.Source=entering.Source;entering.Source=null;}entering.Opacity=0;}ApplyAurora();}
+    int generation;
+    Storyboard? transition;
+    public void Shutdown(){++generation;transition?.Stop();Active=false;ApplyAurora();foreach(var animation in drift)animation?.Dispose();}
+    public event Action<string?>? BackgroundChanged;
+    internal string? CurrentBackgroundPath {get;private set;}
     public bool Aurora {get;set;}=true;
     string themeMode="dark";
-    public string ThemeMode{get=>themeMode;set{if(themeMode==value)return;themeMode=value;if(lastPath!=null)_=Load(lastPath);}}
+    public string ThemeMode{get=>themeMode;set{if(themeMode==value)return;themeMode=value;SetTint(Windows.UI.Color.FromArgb(255,115,115,130));_=Load(lastPath);}}
     static readonly SemaphoreSlim genGate=new(1,1);
     readonly Grid root=new();
     readonly Image shown=new(){Stretch=Stretch.UniformToFill};
     readonly Image entering=new(){Stretch=Stretch.UniformToFill,Opacity=0};
-    readonly Canvas aurora=new(){IsHitTestVisible=false,Opacity=0.55};
+    readonly Canvas aurora=new(){IsHitTestVisible=false,Opacity=0.2};
     readonly Ellipse[] blobs=new Ellipse[3];
-    readonly Storyboard[] drift=new Storyboard[3];
-    readonly Random random=new();
+    readonly Microsoft.UI.Composition.Vector3KeyFrameAnimation?[] drift=new Microsoft.UI.Composition.Vector3KeyFrameAnimation?[3];
     Color[] palette=Array.Empty<Color>();
     string? lastPath;
     public AmbientBackdrop()
     {
+        SetTint(Color.FromArgb(255,115,115,130));
         Content=root;root.Children.Add(shown);root.Children.Add(entering);root.Children.Add(aurora);
-        for(int i=0;i<blobs.Length;i++){blobs[i]=new Ellipse{Opacity=i==0?0.9f:0.55f};aurora.Children.Add(blobs[i]);}
+        for(int i=0;i<blobs.Length;i++){
+            blobs[i]=new Ellipse{Opacity=i==0?0.9f:0.55f};aurora.Children.Add(blobs[i]);
+            Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetIsTranslationEnabled(blobs[i],true);
+        }
+        Unloaded+=(_,_)=>SetActive(false);Loaded+=(_,_)=>SetActive(true);
         root.SizeChanged+=(_,e)=>{root.Clip=new RectangleGeometry{Rect=new Rect(0,0,e.NewSize.Width,e.NewSize.Height)};LayoutBlobs();};
     }
     // 无封面时的占位：按封面平均色调的渐变（浅色主题用亮版）。
     public void SetTint(Color c)
     {
         var top=ThemeMode=="light"?Color.FromArgb(255,(byte)Math.Min(255,c.R*55/100+120),(byte)Math.Min(255,c.G*55/100+120),(byte)Math.Min(255,c.B*55/100+120)):Color.FromArgb(255,(byte)(c.R*38/100),(byte)(c.G*38/100),(byte)(c.B*38/100));
-        var bottom=ThemeMode=="light"?Color.FromArgb(255,235,240,235):Color.FromArgb(255,11,17,15);
+        var bottom=ThemeMode=="light"?Color.FromArgb(255,243,243,246):Color.FromArgb(255,24,25,30);
         root.Background=new LinearGradientBrush{StartPoint=new Point(0,0),EndPoint=new Point(0,1),GradientStops=new GradientStopCollection{
             new GradientStop{Offset=0,Color=top},new GradientStop{Offset=1,Color=bottom}}};
     }
@@ -51,34 +63,36 @@ public sealed class AmbientBackdrop : UserControl
     public void SetSource(string? path){if(path!=lastPath){lastPath=path;_=Load(path);}}
     async Task Load(string? path)
     {
+        int request=++generation;
+        string mode=ThemeMode;
+        transition?.Stop();
+        if(entering.Source!=null){shown.Source=entering.Source;entering.Source=null;}entering.Opacity=0;
         string? file=null;
-        try{
-            if(!string.IsNullOrEmpty(path)&&File.Exists(path))file=await RenderBlurredAsync(path,ThemeMode);
-        }catch(Exception e){Services.AppPaths.Log("Ambient: "+e.Message);}
-        if(file!=null){
-            var colors=LoadColors(file);
-            if(colors.Length>0){palette=colors;ApplyAuroraColors();PaletteChanged?.Invoke(colors);}
-        }
+        try{if(!string.IsNullOrEmpty(path)&&File.Exists(path))file=await RenderBlurredAsync(path,mode);}
+        catch(Exception e){Services.AppPaths.Log("Ambient: "+e.Message);}
+        if(request!=generation)return;
+        palette=file==null?[]:LoadColors(file);
+        CurrentBackgroundPath=file;
+        ApplyAuroraColors();PaletteChanged?.Invoke(palette);BackgroundChanged?.Invoke(file);
         if(file==null){shown.Source=null;entering.Source=null;return;}
         ImageSource src=new BitmapImage(new Uri(file));
-        if(Reduced){shown.Source=src;entering.Opacity=0;return;}
+        if(Reduced||!Active){shown.Source=src;entering.Source=null;entering.Opacity=0;return;}
         entering.Source=src;
-        var sb=new Storyboard();
-        var anim=new DoubleAnimation{From=0,To=1,Duration=new Duration(TimeSpan.FromMilliseconds(750)),EasingFunction=new QuadraticEase{EasingMode=EasingMode.EaseOut}};
-        Storyboard.SetTarget(anim,entering);Storyboard.SetTargetProperty(anim,"Opacity");
-        sb.Children.Add(anim);
-        sb.Completed+=(_,_)=>{shown.Source=entering.Source;entering.Source=null;entering.Opacity=0;};
+        var sb=new Storyboard();transition=sb;
+        var anim=new DoubleAnimation{From=0,To=1,Duration=new Duration(TimeSpan.FromMilliseconds(600)),EasingFunction=new QuadraticEase{EasingMode=EasingMode.EaseOut}};
+        Storyboard.SetTarget(anim,entering);Storyboard.SetTargetProperty(anim,"Opacity");sb.Children.Add(anim);
+        sb.Completed+=(_,_)=>{if(request!=generation)return;shown.Source=src;entering.Source=null;entering.Opacity=0;};
         sb.Begin();
     }
     // ---------- 流光 ----------
     public void ApplyAurora()
     {
-        aurora.Visibility=Aurora&&!Reduced?Visibility.Visible:Visibility.Collapsed;
-        if(Aurora&&!Reduced)StartDrift();else foreach(var sb in drift)sb?.Pause();
+        aurora.Visibility=Aurora&&!Reduced&&Active&&palette.Length>0?Visibility.Visible:Visibility.Collapsed;
+        if(Aurora&&!Reduced&&Active&&palette.Length>0)StartDrift();else foreach(var blob in blobs)Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(blob).StopAnimation("Translation");
     }
     void ApplyAuroraColors()
     {
-        if(palette.Length==0)return;
+        if(palette.Length==0){ApplyAurora();return;}
         for(int i=0;i<blobs.Length;i++){
             var c=palette[i%palette.Length];
             var brush=new RadialGradientBrush{Center=new Point(.5,.5),RadiusX=.5,RadiusY=.5};
@@ -100,25 +114,24 @@ public sealed class AmbientBackdrop : UserControl
     }
     void StartDrift()
     {
-        if(!Aurora||Reduced||root.ActualWidth<=0)return;
-        double w=root.ActualWidth,h=root.ActualHeight;
+        if(!Aurora||Reduced||!Active||palette.Length==0||root.ActualWidth<=0)return;
         for(int i=0;i<blobs.Length;i++){
-            drift[i]?.Stop();
-            double left=Canvas.GetLeft(blobs[i]),top=Canvas.GetTop(blobs[i]);
-            double dx=(random.NextDouble()*.3-.1)*w,dy=(random.NextDouble()*.24-.08)*h;
-            var sb=new Storyboard{RepeatBehavior=RepeatBehavior.Forever,AutoReverse=true};
-            var ax=new DoubleAnimation{From=left,To=left+dx,Duration=new Duration(TimeSpan.FromSeconds(16+i*7)),EasingFunction=new SineEase{EasingMode=EasingMode.EaseInOut}};
-            var ay=new DoubleAnimation{From=top,To=top+dy,Duration=new Duration(TimeSpan.FromSeconds(19+i*6)),EasingFunction=new SineEase{EasingMode=EasingMode.EaseInOut}};
-            Storyboard.SetTarget(ax,blobs[i]);Storyboard.SetTargetProperty(ax,"(Canvas.Left)");
-            Storyboard.SetTarget(ay,blobs[i]);Storyboard.SetTargetProperty(ay,"(Canvas.Top)");
-            sb.Children.Add(ax);sb.Children.Add(ay);drift[i]=sb;sb.Begin();
+            var visual=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(blobs[i]);
+            Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetIsTranslationEnabled(blobs[i],true);
+            visual.StopAnimation("Translation");drift[i]?.Dispose();
+            var animation=visual.Compositor.CreateVector3KeyFrameAnimation();
+            animation.InsertKeyFrame(0,Vector3.Zero);
+            animation.InsertKeyFrame(.5f,new Vector3((float)(root.ActualWidth*.09*(i%2==0?1:-1)),(float)(root.ActualHeight*.06),0));
+            animation.InsertKeyFrame(1,Vector3.Zero);animation.Duration=TimeSpan.FromSeconds(32+i*8);
+            animation.IterationBehavior=Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
+            drift[i]=animation;visual.StartAnimation("Translation",animation);
         }
     }
     // ---------- 离线渲染 ----------
     static async Task<string?> RenderBlurredAsync(string coverPath,string mode)
     {
         bool light=mode=="light";
-        var key=(light?"v4l-":"v4d-")+Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(coverPath.ToLowerInvariant())))[..16].ToLowerInvariant();
+        var key=(light?"v5l-":"v5d-")+Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(coverPath.ToLowerInvariant()+File.GetLastWriteTimeUtc(coverPath).Ticks)))[..16].ToLowerInvariant();
         var outFile=System.IO.Path.Combine(Services.AppPaths.Cache,"ambient-"+key+".png");
         if(File.Exists(outFile))return outFile;
         await genGate.WaitAsync();
@@ -129,21 +142,21 @@ public sealed class AmbientBackdrop : UserControl
             float w=1920,h=1200;
             using var target=new CanvasRenderTarget(device,w,h,96);
             using(var ds=target.CreateDrawingSession()){
-                ds.Clear(light?Color.FromArgb(255,238,242,237):Color.FromArgb(255,12,18,16));
+                ds.Clear(light?Color.FromArgb(255,243,243,246):Color.FromArgb(255,24,25,30));
                 float iw=(float)bmp.Size.Width,ih=(float)bmp.Size.Height;
                 // 放大 1.25 倍铺满，模糊采样不露边缘。
                 float scale=MathF.Max(w/iw,h/ih)*1.25f;
                 // 浅色版要真正提亮：封面压低不透明度让白底透出，再叠更强的白色渐变。
-                using var blur=new GaussianBlurEffect{Source=bmp,BlurAmount=MathF.Max(70,w*.06f),BorderMode=EffectBorderMode.Hard,Optimization=EffectOptimization.Balanced};
-                using var sat=new SaturationEffect{Source=blur,Saturation=1.18f};
-                ds.DrawImage(sat,new Rect((w-iw*scale)/2f,(h-ih*scale)/2f,iw*scale,ih*scale),new Rect(0,0,iw,ih),light?0.5f:0.9f);
+                using var blur=new GaussianBlurEffect{Source=bmp,BlurAmount=MathF.Max(28,w*.024f),BorderMode=EffectBorderMode.Hard,Optimization=EffectOptimization.Balanced};
+                using var sat=new SaturationEffect{Source=blur,Saturation=.82f};
+                ds.DrawImage(sat,new Rect((w-iw*scale)/2f,(h-ih*scale)/2f,iw*scale,ih*scale),new Rect(0,0,iw,ih),light?0.46f:0.62f);
                 CanvasGradientStop[] stops=light?new[]{
                     new CanvasGradientStop{Position=0,Color=Color.FromArgb(160,255,255,255)},
                     new CanvasGradientStop{Position=.45f,Color=Color.FromArgb(115,255,255,255)},
-                    new CanvasGradientStop{Position=1,Color=Color.FromArgb(185,250,252,250)}}:new[]{
-                    new CanvasGradientStop{Position=0,Color=Color.FromArgb(95,6,10,9)},
-                    new CanvasGradientStop{Position=.45f,Color=Color.FromArgb(55,6,10,9)},
-                    new CanvasGradientStop{Position=1,Color=Color.FromArgb(125,4,8,7)}};
+                    new CanvasGradientStop{Position=1,Color=Color.FromArgb(185,245,245,248)}}:new[]{
+                    new CanvasGradientStop{Position=0,Color=Color.FromArgb(95,18,19,24)},
+                    new CanvasGradientStop{Position=.45f,Color=Color.FromArgb(55,18,19,24)},
+                    new CanvasGradientStop{Position=1,Color=Color.FromArgb(125,20,21,26)}};
                 using var shade=new CanvasLinearGradientBrush(device,stops){StartPoint=new Vector2(0,0),EndPoint=new Vector2(0,h)};
                 ds.FillRectangle(0,0,w,h,shade);
             }

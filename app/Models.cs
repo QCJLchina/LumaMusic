@@ -63,11 +63,18 @@ public class Preferences
     public string LastTrack {get;set;}="";public double LastPosition {get;set;}
     // 主题：0 跟随系统 / 1 深色 / 2 浅色；关闭窗口最小化到托盘；背景流光（取色自封面）
     public int Theme {get;set;} public bool CloseToTray {get;set;} public bool Aurora {get;set;}=true;
+    // 歌曲列表点击行为：false 单击播放（默认），true 双击播放
+    public bool DoubleClickPlay {get;set;}
+    public bool ReducedTransparency {get;set;}
     public DateTime LastUpdateCheck {get;set;}
     public DeviceProfile Profile=>Profiles.TryGetValue($"{DeviceBackend}:{DeviceId}",out var p)?p:Profiles[$"{DeviceBackend}:{DeviceId}"]=new(){Backend=DeviceBackend};
 }
 public record LyricLine(double Time,string Text);
 public record Playlist(long Id,string Name);
+public record ArtistSummary(string Name, int Albums, int Songs)
+{
+    public string Description => $"{Albums} 张专辑 · {Songs} 首歌曲";
+}
 public record CoverCandidate(string Title,string Artist,string ReleaseId,string Thumbnail);
 public record SongVersion(long Id,string Name,string Artist,string Album)
 {
