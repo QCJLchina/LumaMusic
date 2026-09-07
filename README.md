@@ -2,6 +2,20 @@
 
 Windows 无损音乐播放器：WinUI 3 前端 + C++/BASS 原生音频引擎，面向位完美（bit-perfect）回放。
 
+## 界面预览
+
+| 音乐库（深色） | 正在播放（深色） |
+| --- | --- |
+| ![音乐库 · 深色主题](docs/screenshots/dark-library.png) | ![正在播放 · 深色主题](docs/screenshots/dark-nowplaying.png) |
+
+| 歌曲列表（深色） | 音乐库（浅色） |
+| --- | --- |
+| ![歌曲列表 · 深色主题](docs/screenshots/dark-songs.png) | ![音乐库 · 浅色主题](docs/screenshots/light-library.png) |
+
+| 歌曲列表（浅色） | 正在播放（浅色） |
+| --- | --- |
+| ![歌曲列表 · 浅色主题](docs/screenshots/light-songs.png) | ![正在播放 · 浅色主题](docs/screenshots/light-nowplaying.png)
+
 ## 特性
 
 - **格式**：FLAC / APE / ALAC / Opus / WavPack / WAV，以及 **DSF / DFF / SACD ISO**（内置 DSD 解码工作进程，支持 DST 解码）
