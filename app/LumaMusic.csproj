@@ -27,6 +27,10 @@
     <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.1.11" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
   </ItemGroup>
+  <!-- Opt-in native UI regression runner; excluded from normal builds and releases. -->
+  <ItemGroup Condition="'$(LumaUiRegression)' == 'true'">
+    <Compile Include="../tests/UiRegression.cs" Link="UiRegression.cs" />
+  </ItemGroup>
   <ItemGroup>
     <Content Include="../build/native-bin/*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../build/native-bin/LumaDsd.exe" Link="LumaDsd.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
