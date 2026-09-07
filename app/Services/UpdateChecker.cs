@@ -7,7 +7,7 @@ public static class UpdateChecker
 {
     public const string Repo="QCJLchina/LumaMusic";
     static readonly HttpClient client=new(){Timeout=TimeSpan.FromSeconds(12)};
-    public static string CurrentVersion=>Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]??"1.0.2";
+    public static string CurrentVersion=>Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]??"1.1.0";
     public static bool IsPackaged
     {
         get{
