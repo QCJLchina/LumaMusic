@@ -114,8 +114,8 @@ public sealed partial class MainWindow
     void UpdateResponsiveLayout()
     {
         compactLayout = Root.ActualWidth < 1100;
-        SidebarColumn.Width = new(compactLayout ? 76 : 208);
-        Workspace.ColumnSpacing = compactLayout ? 16 : 28;
+        SidebarColumn.Width = new(nowVisible ? 0 : compactLayout ? 76 : 208);
+        Workspace.ColumnSpacing = nowVisible ? 0 : compactLayout ? 16 : 28;
         foreach (var label in new FrameworkElement[] { LibraryNavLabel, NowNavLabel, FavoritesNavLabel, ImportNavLabel, SettingsNavLabel, PlaylistHeading, LibraryCount })
             label.Visibility = compactLayout ? Visibility.Collapsed : Visibility.Visible;
         PlayerInfoColumn.Width = new(compactLayout ? 180 : 250);
@@ -123,8 +123,9 @@ public sealed partial class MainWindow
         PlayerLayout.ColumnSpacing = compactLayout ? 12 : 20;
         VolumeSlider.Visibility = compactLayout ? Visibility.Collapsed : Visibility.Visible;
         CompactVolume.Visibility = compactLayout ? Visibility.Visible : Visibility.Collapsed;
-        double available = Math.Max(160, (Root.ActualWidth - (compactLayout ? 170 : 330)) / 2 - 70);
-        LargeCover.Width = LargeCover.Height = Math.Clamp(Math.Min(available, Root.ActualHeight - 370), 160, 360);
+        double available = Math.Max(160, (Root.ActualWidth - (nowVisible ? 120 : compactLayout ? 170 : 330)) / 2 - 70);
+        LargeCover.Width = LargeCover.Height = Math.Clamp(Math.Min(available, Root.ActualHeight - 300), 160, 390);
+        CoverReflection.Width = LargeCover.Width; CoverReflection.Height = Math.Clamp(LargeCover.Height * .28, 55, 105);
         QueuePanel.Width = Math.Min(340, Math.Max(260, Root.ActualWidth - 160));
         foreach (var button in PlaylistNav.Children.OfType<Button>())
             if (button.Tag is Playlist playlist) ConfigurePlaylistButton(button, playlist);

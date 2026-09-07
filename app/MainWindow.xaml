@@ -76,7 +76,7 @@
           </StackPanel>
         </Grid>
       </controls:GlassSurface>
-      <Grid Grid.Column="1" Margin="0,6,8,0">
+      <Grid Grid.Column="1" Margin="0,6,8,0" x:Name="ContentHost">
         <Grid x:Name="LibraryPage" RowSpacing="20">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -110,11 +110,14 @@
                 <TextBlock Text="艺术家" FontSize="14" />
               </Button>
             </StackPanel>
-            <TextBlock x:Name="TrackCount" Text="0 首歌曲" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12" Foreground="{ThemeResource TextSecondary}" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="10">
+              <TextBlock x:Name="TrackCount" Text="0 首歌曲" VerticalAlignment="Center" FontSize="12" Foreground="{ThemeResource TextSecondary}" />
+              <Button x:Name="MultiSelectButton" Click="MultiSelect_Click" Content="多选" Style="{StaticResource QuietButton}" Padding="12,6" />
+            </StackPanel>
             <Button Click="BrowseBack_Click" Content="返回浏览" Style="{StaticResource QuietButton}" Margin="285,0,0,0" HorizontalAlignment="Left" Visibility="Collapsed" x:Name="BrowseBack" />
           </Grid>
           <Grid Grid.Row="2">
-            <ListView x:Name="TrackList" IsItemClickEnabled="True" ItemClick="Track_ItemClick" DoubleTapped="Track_DoubleTapped" SelectionMode="Single" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListView x:Name="TrackList" IsItemClickEnabled="True" ItemClick="Track_ItemClick" DoubleTapped="Track_DoubleTapped" SelectionChanged="TrackList_SelectionChanged" SelectionMode="Single" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
               <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                   <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -156,6 +159,23 @@
                 </DataTemplate>
               </ListView.ItemTemplate>
             </ListView>
+            <Border x:Name="BatchBar" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Stretch" CornerRadius="18" Padding="12,8" Background="{ThemeResource ButtonFillStrong}" BorderBrush="{ThemeResource ButtonStroke}" BorderThickness="1" Canvas.ZIndex="10">
+              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                <TextBlock x:Name="SelectedCount" Text="已选择 0 首" VerticalAlignment="Center" FontSize="12" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5" HorizontalAlignment="Center">
+                  <Button Click="BatchPlay_Click" Content="播放" Padding="10,5" />
+                  <Button Click="BatchNext_Click" Content="下一首" Padding="10,5" />
+                  <Button Click="BatchPlaylist_Click" Content="加入歌单" Padding="10,5" />
+                  <Button Click="BatchFavorite_Click" Content="收藏" Padding="10,5" />
+                  <Button Click="BatchUnfavorite_Click" Content="取消收藏" Padding="10,5" />
+                  <Button Click="BatchRemove_Click" Content="移除" Padding="10,5" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                  <Button Click="SelectAll_Click" Content="全选" Style="{StaticResource QuietButton}" Padding="8,5" />
+                  <Button Click="MultiSelect_Click" Content="完成" Style="{StaticResource QuietButton}" Padding="8,5" />
+                </StackPanel>
+              </Grid>
+            </Border>
             <GridView x:Name="AlbumGrid" Visibility="Collapsed" IsItemClickEnabled="True" ItemClick="Album_ItemClick" SelectionMode="None">
               <GridView.ItemTemplate>
                 <DataTemplate x:DataType="local:Track">
@@ -202,7 +222,7 @@
             <RowDefinition Height="64" />
           </Grid.RowDefinitions>
           <Grid>
-            <Button Style="{StaticResource QuietButton}" HorizontalAlignment="Left" Click="Library_Click">
+            <Button Style="{StaticResource QuietButton}" HorizontalAlignment="Left" Click="NowBack_Click">
               <StackPanel Orientation="Horizontal" Spacing="10">
                 <FontIcon Glyph="" FontSize="12" />
                 <TextBlock Text="返回音乐库" FontSize="12" />
@@ -219,7 +239,7 @@
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" x:Name="CoverScroll">
-              <StackPanel VerticalAlignment="Center" Spacing="21" Margin="12,12,12,12">
+              <StackPanel VerticalAlignment="Center" Spacing="0" Margin="12,12,12,12">
                 <Border x:Name="LargeCover" CornerRadius="28" BorderBrush="{ThemeResource StrokeWeak}" BorderThickness="1" Background="{ThemeResource ButtonFill}" Height="310" MaxWidth="360" HorizontalAlignment="Center" Width="310" Translation="0,0,28">
                   <Border.Shadow>
                     <ThemeShadow />
@@ -231,7 +251,12 @@
                     <Image x:Name="CoverImage" Stretch="UniformToFill" />
                   </Grid>
                 </Border>
-                <StackPanel Spacing="7">
+                <Border x:Name="CoverReflection" Height="100" Width="310" MaxWidth="360" HorizontalAlignment="Center" Opacity="0.16" RenderTransformOrigin="0.5,0.5" CornerRadius="0,0,24,24">
+                  <Border.RenderTransform><ScaleTransform ScaleY="-1" /></Border.RenderTransform>
+
+                  <Image x:Name="ReflectionImage" Stretch="UniformToFill" />
+                </Border>
+                <StackPanel Spacing="7" Margin="0,10,0,0">
                   <TextBlock x:Name="NowTitle" Text="留一点时间，给音乐。" FontSize="25" FontWeight="SemiBold" TextWrapping="WrapWholeWords" MaxLines="2" />
                   <TextBlock x:Name="NowArtist" Text="选择一首歌，开始聆听" FontSize="14" Foreground="{ThemeResource TextSecondary}" TextTrimming="CharacterEllipsis" />
                   <TextBlock x:Name="NowAlbum" FontSize="12" Foreground="{ThemeResource TextSecondary}" TextTrimming="CharacterEllipsis" />
@@ -258,7 +283,7 @@
               <TextBlock x:Name="LyricsPlaceholder" Grid.Row="1" Text="歌词会在这里，随着音乐浮现。" TextWrapping="Wrap" VerticalAlignment="Center" FontSize="21" LineHeight="36" Foreground="{ThemeResource TextSecondary}" />
             </Grid>
           </Grid>
-          <Border Grid.Row="2" VerticalAlignment="Center" CornerRadius="18" BorderBrush="{ThemeResource StrokeWeak}" BorderThickness="1" Padding="16,12" Background="{ThemeResource SignalChipBackground}">
+          <Border x:Name="SignalDetails" Grid.Row="2" VerticalAlignment="Center" CornerRadius="18" BorderBrush="{ThemeResource StrokeWeak}" BorderThickness="1" Padding="16,12" Background="{ThemeResource SignalChipBackground}">
             <Grid>
               <TextBlock x:Name="SignalPath" Text="等待播放 · 选择音频输出设备" Foreground="{ThemeResource TextSecondary}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,0,85,0" VerticalAlignment="Center" />
               <Button HorizontalAlignment="Right" Click="Settings_Click" Style="{StaticResource QuietButton}" Padding="5,0">

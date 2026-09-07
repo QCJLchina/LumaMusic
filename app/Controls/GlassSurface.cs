@@ -49,7 +49,7 @@ public sealed class GlassSurface : UserControl
         Unloaded += (_, _) => ReleaseLens();
         SizeChanged += (_, _) => UpdateLens();
         ActualThemeChanged += (_, _) => Refresh();
-        PointerEntered += (_, _) => Illuminate(1);
+        PointerEntered += (_, _) => Illuminate(.42f);
         PointerExited += (_, _) => Illuminate(0);
     }
     public void Configure(bool reduceTransparency, bool reduceMotion, bool highContrast)
@@ -71,8 +71,8 @@ public sealed class GlassSurface : UserControl
         {
             material.Background = reduced ? new SolidColorBrush(tint) : new AcrylicBrush
             {
-                TintColor = tint, TintOpacity = Preset == GlassPreset.Overlay ? .72 : .36,
-                TintLuminosityOpacity = light ? .78 : .55, FallbackColor = tint
+                TintColor = tint, TintOpacity = Preset == GlassPreset.Overlay ? .52 : Preset == GlassPreset.Player ? .22 : .30,
+                TintLuminosityOpacity = light ? .64 : .38, FallbackColor = tint
             };
             rim.BorderBrush = new LinearGradientBrush
             {
@@ -116,7 +116,7 @@ public sealed class GlassSurface : UserControl
             if (lens == null)
             {
                 lensBrush = compositor.CreateSurfaceBrush(source); lensBrush.Stretch = CompositionStretch.None;
-                lens = compositor.CreateSpriteVisual(); lens.Brush = lensBrush; lens.Opacity = .28f;
+                lens = compositor.CreateSpriteVisual(); lens.Brush = lensBrush; lens.Opacity = Preset == GlassPreset.Player ? .40f : .30f;
                 ElementCompositionPreview.SetElementChildVisual(lensHost, lens);
             }
             float w = (float)ActualWidth, h = (float)ActualHeight;

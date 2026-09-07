@@ -35,9 +35,9 @@ public sealed class AmbientBackdrop : UserControl
     readonly Grid root=new();
     readonly Image shown=new(){Stretch=Stretch.UniformToFill};
     readonly Image entering=new(){Stretch=Stretch.UniformToFill,Opacity=0};
-    readonly Canvas aurora=new(){IsHitTestVisible=false,Opacity=0.2};
-    readonly Ellipse[] blobs=new Ellipse[3];
-    readonly Microsoft.UI.Composition.Vector3KeyFrameAnimation?[] drift=new Microsoft.UI.Composition.Vector3KeyFrameAnimation?[3];
+    readonly Canvas aurora=new(){IsHitTestVisible=false,Opacity=0.42};
+    readonly Ellipse[] blobs=new Ellipse[4];
+    readonly Microsoft.UI.Composition.Vector3KeyFrameAnimation?[] drift=new Microsoft.UI.Composition.Vector3KeyFrameAnimation?[4];
     Color[] palette=Array.Empty<Color>();
     string? lastPath;
     public AmbientBackdrop()
@@ -45,7 +45,7 @@ public sealed class AmbientBackdrop : UserControl
         SetTint(Color.FromArgb(255,115,115,130));
         Content=root;root.Children.Add(shown);root.Children.Add(entering);root.Children.Add(aurora);
         for(int i=0;i<blobs.Length;i++){
-            blobs[i]=new Ellipse{Opacity=i==0?0.9f:0.55f};aurora.Children.Add(blobs[i]);
+            blobs[i]=new Ellipse{Opacity=i==0?0.92f:0.64f};aurora.Children.Add(blobs[i]);
             Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetIsTranslationEnabled(blobs[i],true);
         }
         Unloaded+=(_,_)=>SetActive(false);Loaded+=(_,_)=>SetActive(true);
@@ -88,7 +88,7 @@ public sealed class AmbientBackdrop : UserControl
     public void ApplyAurora()
     {
         aurora.Visibility=Aurora&&!Reduced&&Active&&palette.Length>0?Visibility.Visible:Visibility.Collapsed;
-        if(Aurora&&!Reduced&&Active&&palette.Length>0)StartDrift();else foreach(var blob in blobs)Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(blob).StopAnimation("Translation");
+        if(Aurora&&!Reduced&&Active&&palette.Length>0)StartDrift();else foreach(var blob in blobs){var visual=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(blob);visual.StopAnimation("Translation");visual.StopAnimation("Scale");visual.StopAnimation("Opacity");}
     }
     void ApplyAuroraColors()
     {
@@ -96,7 +96,7 @@ public sealed class AmbientBackdrop : UserControl
         for(int i=0;i<blobs.Length;i++){
             var c=palette[i%palette.Length];
             var brush=new RadialGradientBrush{Center=new Point(.5,.5),RadiusX=.5,RadiusY=.5};
-            brush.GradientStops.Add(new GradientStop{Offset=0,Color=Color.FromArgb(165,c.R,c.G,c.B)});
+            brush.GradientStops.Add(new GradientStop{Offset=0,Color=Color.FromArgb(i==0?(byte)185:(byte)145,c.R,c.G,c.B)});
             brush.GradientStops.Add(new GradientStop{Offset=1,Color=Color.FromArgb(0,c.R,c.G,c.B)});
             blobs[i].Fill=brush;
         }
@@ -105,9 +105,9 @@ public sealed class AmbientBackdrop : UserControl
     void LayoutBlobs()
     {
         double w=root.ActualWidth,h=root.ActualHeight;if(w<=0||h<=0)return;
-        double[] sizes={.62,.5,.72};Point[] bases={new(.08,.12),new(.55,-.08),new(.3,.5)};
+        double extent=Math.Max(w,h);double[] sizes={.82,.68,.92,.60};Point[] bases={new(-.12,-.08),new(.55,-.18),new(.28,.48),new(.72,.52)};
         for(int i=0;i<blobs.Length;i++){
-            blobs[i].Width=blobs[i].Height=w*sizes[i];
+            blobs[i].Width=blobs[i].Height=extent*sizes[i];
             Canvas.SetLeft(blobs[i],w*bases[i].X);Canvas.SetTop(blobs[i],h*bases[i].Y);
         }
         StartDrift();
@@ -121,10 +121,14 @@ public sealed class AmbientBackdrop : UserControl
             visual.StopAnimation("Translation");drift[i]?.Dispose();
             var animation=visual.Compositor.CreateVector3KeyFrameAnimation();
             animation.InsertKeyFrame(0,Vector3.Zero);
-            animation.InsertKeyFrame(.5f,new Vector3((float)(root.ActualWidth*.09*(i%2==0?1:-1)),(float)(root.ActualHeight*.06),0));
-            animation.InsertKeyFrame(1,Vector3.Zero);animation.Duration=TimeSpan.FromSeconds(32+i*8);
+            animation.InsertKeyFrame(.28f,new Vector3((float)(root.ActualWidth*.12*(i%2==0?1:-1)),(float)(root.ActualHeight*.08*(i<2?1:-1)),0));
+            animation.InsertKeyFrame(.62f,new Vector3((float)(root.ActualWidth*.07*(i%2==0?-1:1)),(float)(root.ActualHeight*.13*(i<2?-1:1)),0));
+            animation.InsertKeyFrame(1,Vector3.Zero);animation.Duration=TimeSpan.FromSeconds(24+i*7);
             animation.IterationBehavior=Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
-            drift[i]=animation;visual.StartAnimation("Translation",animation);
+            visual.CenterPoint=new Vector3((float)(blobs[i].ActualWidth/2),(float)(blobs[i].ActualHeight/2),0);
+            var breathe=visual.Compositor.CreateVector3KeyFrameAnimation();breathe.InsertKeyFrame(0,Vector3.One);breathe.InsertKeyFrame(.5f,new Vector3(1.12f-i*.015f,1.08f+i*.01f,1));breathe.InsertKeyFrame(1,Vector3.One);breathe.Duration=TimeSpan.FromSeconds(18+i*5);breathe.IterationBehavior=Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
+            var shimmer=visual.Compositor.CreateScalarKeyFrameAnimation();shimmer.InsertKeyFrame(0,i==0?.72f:.46f);shimmer.InsertKeyFrame(.5f,i==0?.96f:.70f);shimmer.InsertKeyFrame(1,i==0?.72f:.46f);shimmer.Duration=TimeSpan.FromSeconds(15+i*4);shimmer.IterationBehavior=Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
+            drift[i]=animation;visual.StartAnimation("Translation",animation);visual.StartAnimation("Scale",breathe);visual.StartAnimation("Opacity",shimmer);
         }
     }
     // ---------- 离线渲染 ----------

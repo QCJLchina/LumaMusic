@@ -54,7 +54,8 @@ public sealed partial class MainWindow
                     new { Root.ActualWidth, Root.ActualHeight, dpi = Root.XamlRoot.RasterizationScale, seek = SeekSlider.ActualWidth });
                 Check($"compact policy {theme} {size}", (Root.ActualWidth < 1100) == (CompactVolume.Visibility == Visibility.Visible));
                 Now_Click(this, new()); await Settle();
-                Check($"now bounds {theme} {size}", Within(LargeCover) && Within(LyricsScroll) && Within(SignalPath));
+                Check($"now bounds {theme} {size}", Within(LargeCover) && Within(LyricsScroll) && Within(PlayButton));
+                Check($"immersive layout {theme} {size}", SidebarGlass.Visibility == Visibility.Collapsed && Grid.GetColumn(ContentHost) == 0 && Grid.GetColumnSpan(ContentHost) == 2 && SignalDetails.Visibility == Visibility.Collapsed);
                 Queue_Click(this, new()); await Settle();
                 Check($"queue bounds {theme} {size}", Within(QueuePanel));
                 Queue_Click(this, new());
@@ -62,6 +63,10 @@ public sealed partial class MainWindow
             AppWindow.Resize(new(1320, 860)); prefs.Theme = 1; ApplyTheme(); await Settle();
             Library_Click(this, new()); SongsTab_Click(this, new());
             Check("songs view", TrackList.Visibility == Visibility.Visible && visible.Count == 36);
+            EnterMultiSelect(); TrackList.SelectedItems.Add(visible[0]); TrackList.SelectedItems.Add(visible[1]);
+            Check("multi-select", multiSelecting && TrackList.SelectionMode == ListViewSelectionMode.Multiple && TrackList.SelectedItems.Count == 2 && BatchBar.Visibility == Visibility.Visible);
+            SelectAll_Click(this, new()); Check("select all filtered", TrackList.SelectedItems.Count == visible.Count);
+            ExitMultiSelect(); Check("multi-select exit", !multiSelecting && TrackList.SelectionMode == ListViewSelectionMode.Single && TrackList.SelectedItems.Count == 0);
             ArtistsTab_Click(this, new());
             Check("artist aggregation", ArtistList.ItemsSource is List<ArtistSummary> artists && artists.Count == 6 && artists.Sum(a => a.Songs) == 36);
             artistFilter = "林间回声"; showArtists = false; showAlbums = false; Filter();
@@ -152,10 +157,18 @@ public sealed partial class MainWindow
             library.CreatePlaylist("UI regression playlist"); RefreshPlaylists();
             var created = library.Playlists().Single(p => p.Name == "UI regression playlist");
             Check("playlist creation reaches navigation", PlaylistNav.Children.OfType<Button>().Any(b => b.Tag is Playlist p && p.Id == created.Id));
+            var batchIds = originalTracks.Take(2).Select(t => t.Id).ToArray();
+            library.AddToPlaylist(created.Id, batchIds.Concat(batchIds)); Check("batch playlist add deduplicates", library.PlaylistTracks(created.Id).Count == 2);
+            library.RemoveFromPlaylist(created.Id, [batchIds[0]]); Check("batch playlist remove", library.PlaylistTracks(created.Id).SetEquals([batchIds[1]]));
+            library.SetFavorite(batchIds, true); Check("batch favorite persists", library.Load().Where(t => batchIds.Contains(t.Id)).All(t => t.Favorite));
             library.DeletePlaylist(created.Id); RefreshPlaylists();
             await Import([track.Path]); Check("real WAV import", tracks.Count == 37 && tracks.Any(t => t.Title == "silence"));
+            var imported = tracks.Single(t => t.Title == "silence"); var importedPath = imported.Path; library.RemoveTracks([imported.Id]);
+            Check("library removal keeps source", !library.Load().Any(t => t.Id == imported.Id) && File.Exists(importedPath));
+            await Import([importedPath]); Check("removed track can be reimported", tracks.Any(t => t.Id == imported.Id));
 
             Library_Click(this, new()); await Settle();
+            Now_Click(this, new()); await Settle(700);
         }
         catch (Exception ex) { checks.Add(new { name = "runner", passed = false, detail = ex.ToString() }); }
         finally
