@@ -1,0 +1,114 @@
+name: Release
+
+# push v* tag → 构建原生引擎 + 应用 → 打 zip/msix → 签名 → 创建 draft release 上传三件套。
+# workflow_dispatch 供手动验证构建（不发 release）。
+# 前提：仓库 Secrets 需配置 LUMA_PFX（pfx 的 base64）与 LUMA_PFX_PASSWORD（签名密码）。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # bootstrap.py 的下载源全部 pin（.downloads 里文件存在即跳过），命中缓存则零下载
+      - name: Cache bootstrap downloads
+        uses: actions/cache@v4
+        with:
+          path: .downloads
+          key: luma-downloads-windows-v1
+
+      # 项目 SDK 固定 10.0.400，build.ps1 硬编码 .tools/dotnet/dotnet.exe
+      - name: Cache dotnet SDK
+        uses: actions/cache@v4
+        with:
+          path: .tools
+          key: luma-dotnet-10.0.400-windows-v1
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: .packages
+          key: luma-nuget-${{ hashFiles('app/LumaMusic.csproj', '**/NuGet.Config') }}
+
+      - name: Bootstrap dependencies
+        run: python scripts/bootstrap.py
+
+      # bootstrap.py 下载失败只打印不报错，必须自己断言关键产物
+      - name: Verify bootstrap artifacts
+        shell: powershell
+        run: |
+          foreach ($path in @('.tools/dotnet/dotnet.exe', 'vendor/bass/x64/bass.dll', 'vendor/flexasio/FlexASIOSetup.exe')) {
+            if (!(Test-Path $path)) { throw "bootstrap artifact missing: $path" }
+          }
+          $sacd = Get-ChildItem vendor -Directory -Filter 'sacd*' -ErrorAction SilentlyContinue
+          if (!$sacd) { throw 'bootstrap artifact missing: vendor/sacd*' }
+
+      - name: Build native engine (runs LumaNativeTests)
+        shell: powershell
+        run: ./scripts/build-native.ps1
+
+      - name: Build and publish app
+        shell: powershell
+        run: ./scripts/build.ps1 -Publish
+
+      # 版本一致性：csproj <Version> 必须与 tag 一致（v1.2.3 ↔ 1.2.3），防止发错版本
+      - name: Read app version
+        id: version
+        shell: powershell
+        run: |
+          $csproj = Get-Content app/LumaMusic.csproj -Raw
+          if ($csproj -notmatch '<Version>([0-9.]+)</Version>') { throw 'csproj Version not found' }
+          "app=$($Matches[1])" | Out-File $env:GITHUB_OUTPUT -Append
+      - name: Check tag matches version
+        if: github.event_name == 'push'
+        shell: powershell
+        run: |
+          $tag = '${{ github.ref_name }}' -replace '^v', ''
+          if ($tag -ne '${{ steps.version.outputs.app }}') {
+            throw "tag v$tag != csproj Version ${{ steps.version.outputs.app }}（先改 csproj 版本再打 tag）"
+          }
+
+      - name: Restore signing certificate
+        env:
+          LUMA_PFX: ${{ secrets.LUMA_PFX }}
+        shell: powershell
+        run: |
+          if (!$env:LUMA_PFX) { throw 'secret LUMA_PFX 未配置（pfx 的 base64）' }
+          [IO.File]::WriteAllBytes("$env:GITHUB_WORKSPACE/dist/LumaMusic.pfx", [Convert]::FromBase64String($env:LUMA_PFX))
+
+      - name: Package MSIX
+        env:
+          LUMA_PFX_PASSWORD: ${{ secrets.LUMA_PFX_PASSWORD }}
+        shell: powershell
+        run: ./scripts/make-msix.ps1 -Version '${{ steps.version.outputs.app }}.0'
+
+      - name: Package portable zip
+        shell: powershell
+        run: Compress-Archive -Path 'dist/LumaMusic/*' -DestinationPath 'dist/LumaMusic-win-x64.zip' -Force
+
+      # draft：上传三件套后在网页上补 release notes（照 v1.0.2 格式）再手动 Publish
+      - name: Create draft release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: powershell
+        run: |
+          $tag = '${{ github.ref_name }}'
+          # annotated tag 的 message 就是发版说明初稿
+          $notes = git for-each-ref "refs/tags/$tag" --format='%(contents)' | Out-String
+          if (!$notes.Trim()) { $notes = "$tag`n`n（draft：请照 v1.0.2 格式补充 release notes 后 Publish）" }
+          $notes | Out-File release-notes.md -Encoding utf8
+          gh release create $tag --draft --title $tag --notes-file release-notes.md
+          gh release upload $tag dist/LumaMusic-win-x64.zip dist/LumaMusic.msix dist/LumaMusic.cer
