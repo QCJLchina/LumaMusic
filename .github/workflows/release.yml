@@ -47,7 +47,7 @@ jobs:
 
       # bootstrap.py 下载失败只打印不报错，必须自己断言关键产物
       - name: Verify bootstrap artifacts
-        shell: powershell
+        shell: pwsh
         run: |
           foreach ($path in @('.tools/dotnet/dotnet.exe', 'vendor/bass/x64/bass.dll', 'vendor/flexasio/FlexASIOSetup.exe')) {
             if (!(Test-Path $path)) { throw "bootstrap artifact missing: $path" }
@@ -56,47 +56,47 @@ jobs:
           if (!$sacd) { throw 'bootstrap artifact missing: vendor/sacd*' }
 
       - name: Build native engine (runs LumaNativeTests)
-        shell: powershell
+        shell: pwsh
         run: ./scripts/build-native.ps1
 
       - name: Build and publish app
-        shell: powershell
+        shell: pwsh
         run: ./scripts/build.ps1 -Publish
 
       # 版本一致性：csproj <Version> 必须与 tag 一致（v1.2.3 ↔ 1.2.3），防止发错版本
       - name: Read app version
         id: version
-        shell: powershell
+        shell: pwsh
         run: |
           $csproj = Get-Content app/LumaMusic.csproj -Raw
           if ($csproj -notmatch '<Version>([0-9.]+)</Version>') { throw 'csproj Version not found' }
-          # PS5.1 的 Out-File 默认 UTF-16，写 GITHUB_OUTPUT 会被 runner 读成乱码，必须显式 ascii
+          # PS 5.1 Out-File defaults to UTF-16 which corrupts GITHUB_OUTPUT; write explicit ASCII
           Add-Content $env:GITHUB_OUTPUT "app=$($Matches[1])" -Encoding ascii
       - name: Check tag matches version
         if: github.event_name == 'push'
-        shell: powershell
+        shell: pwsh
         run: |
           $tag = '${{ github.ref_name }}' -replace '^v', ''
           if ($tag -ne '${{ steps.version.outputs.app }}') {
-            throw "tag v$tag != csproj Version ${{ steps.version.outputs.app }}（先改 csproj 版本再打 tag）"
+            throw "tag v$tag != csproj Version ${{ steps.version.outputs.app }} (bump csproj Version before tagging)"
           }
 
       - name: Restore signing certificate
         env:
           LUMA_PFX: ${{ secrets.LUMA_PFX }}
-        shell: powershell
+        shell: pwsh
         run: |
-          if (!$env:LUMA_PFX) { throw 'secret LUMA_PFX 未配置（pfx 的 base64）' }
+          if (!$env:LUMA_PFX) { throw 'secret LUMA_PFX not set (base64 of the signing pfx)' }
           [IO.File]::WriteAllBytes("$env:GITHUB_WORKSPACE/dist/LumaMusic.pfx", [Convert]::FromBase64String($env:LUMA_PFX))
 
       - name: Package MSIX
         env:
           LUMA_PFX_PASSWORD: ${{ secrets.LUMA_PFX_PASSWORD }}
-        shell: powershell
+        shell: pwsh
         run: ./scripts/make-msix.ps1 -Version '${{ steps.version.outputs.app }}.0'
 
       - name: Package portable zip
-        shell: powershell
+        shell: pwsh
         run: Compress-Archive -Path 'dist/LumaMusic/*' -DestinationPath 'dist/LumaMusic-win-x64.zip' -Force
 
       # dispatch 干跑不发 release，产物留 artifact 供下载检查
@@ -116,13 +116,9 @@ jobs:
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: powershell
+        shell: pwsh
         run: |
           $tag = '${{ github.ref_name }}'
-          # annotated tag 的 message 就是发版说明初稿
-          $notes = git for-each-ref "refs/tags/$tag" --format='%(contents)' | Out-String
-          if (!$notes.Trim()) { $notes = "$tag`n`n（draft：请照 v1.0.2 格式补充 release notes 后 Publish）" }
-          # 无 BOM UTF-8：gh 按 UTF-8 读 notes，带 BOM 会显示乱字符
-          [IO.File]::WriteAllText("$env:GITHUB_WORKSPACE/release-notes.md", $notes, [Text.UTF8Encoding]::new($false))
-          gh release create $tag --draft --title $tag --notes-file release-notes.md
+          # auto-generated notes; edit the draft on the web (follow the v1.0.2 format) then publish
+          gh release create $tag --draft --title $tag --generate-notes
           gh release upload $tag dist/LumaMusic-win-x64.zip dist/LumaMusic.msix dist/LumaMusic.cer
