@@ -38,14 +38,14 @@ Copy-Item "build\native-bin\LumaAudio.dll" $pub -Force
 Copy-Item "build\native-bin\LumaDsd.exe" $pub -Force
 Write-Host "[3/6] publish 完成（含 LumaAudio.dll / LumaDsd.exe）"
 
-# 4. 打 zip
+# 4. 打 zip（与 CI/打包脚本统一放 dist/）
 $zipName = "LumaMusic-win-x64.zip"
 $stage = "build\release-stage"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage | Out-Null
 Copy-Item "$pub\*" $stage -Recurse
-Compress-Archive -Path "$stage\*" -DestinationPath "build\$zipName" -Force
-Write-Host "[4/6] zip 打包 -> build\$zipName"
+Compress-Archive -Path "$stage\*" -DestinationPath "dist\$zipName" -Force
+Write-Host "[4/6] zip 打包 -> dist\$zipName"
 
 # 5. commit + 本地 tag + push（tag 随 push 上去，图谱同步）
 git add -A
@@ -59,7 +59,7 @@ git push origin main --tags
 if (-not $?) { throw "push 失败" }
 Write-Host "[5/6] commit + tag v$Version + push 完成"
 
-# 6. GitHub Release
+# 6. GitHub Release（三件套统一从 dist/ 取：zip 来自第 4 步，msix/cer 来自 make-msix.ps1 输出）
 $tag = "v$Version"
 $notesFile = "build\release-notes.md"
 $body = @"
@@ -71,14 +71,12 @@ $Notes
 - **便携版**：下载 ``LumaMusic-win-x64.zip`` 解压运行 ``LumaMusic.exe``
 - **MSIX**：先导入 ``LumaMusic.cer``（受信任的根证书颁发机构），再安装 ``LumaMusic.msix``，支持应用内自动更新
 "@
-if (Test-Path "build\LumaMusic.msix") { Copy-Item "build\LumaMusic.msix" "build\LumaMusic.msix.keep" -Force }
 Set-Content $notesFile $body -Encoding UTF8
-$assets = @("build\$zipName")
-if (Test-Path "build\LumaMusic.msix") { $assets += "build\LumaMusic.msix" }
-$cer = Get-ChildItem -Recurse -Filter "LumaMusic.cer" -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($cer) { $assets += $cer.FullName }
+$assets = @("dist\$zipName")
+if (Test-Path "dist\LumaMusic.msix") { $assets += "dist\LumaMusic.msix" }
+if (Test-Path "dist\LumaMusic.cer") { $assets += "dist\LumaMusic.cer" }
+if ($assets.Count -eq 1) { Write-Host "!! dist/ 下没有 msix/cer，本次只发 zip（先跑 scripts/make-msix.ps1 再重跑本脚本第 6 步）" }
 gh release create $tag $assets --title "LumaMusic $Version" --notes-file $notesFile
 if (-not $?) { throw "gh release create 失败" }
-if (Test-Path "build\LumaMusic.msix.keep") { Move-Item "build\LumaMusic.msix.keep" "build\LumaMusic.msix" -Force }
-Write-Host "[6/6] Release $tag 已发布（zip / msix / cer）"
+Write-Host "[6/6] Release $tag 已发布（$($assets.Count) 个资产）"
 Write-Host "完成: https://github.com/QCJLchina/LumaMusic/releases/tag/$tag"
