@@ -133,9 +133,10 @@ public sealed partial class MainWindow : Window
         if(lyricButtons.Count==0)return;
         for(int i=0;i<lyricButtons.Count;i++){
             ((TextBlock)lyricButtons[i].Content).Foreground=i==lyricIndex?ActiveLyric():InactiveLyric();
-            lyricButtons[i].Opacity=LyricOpacity(i,lyricIndex);
+            lyricButtons[i].Opacity=1;
         }
         LyricsPlaceholder.Foreground=InactiveLyric();
+        UpdateLyricFocus(lyricIndex);
     }
     Color[] lastPalette=[];
     static readonly (string Key,byte Alpha)[] SliderAccentBrushes={("SliderThumbBackground",255),("SliderThumbBackgroundPointerOver",230),("SliderThumbBackgroundPressed",204),("SliderTrackValueFill",235),("SliderTrackValueFillPointerOver",204),("SliderTrackValueFillPressed",153)};
@@ -156,7 +157,7 @@ public sealed partial class MainWindow : Window
     Color OnAmbient(byte a)=>LightTheme?Color.FromArgb(a,32,33,39):Color.FromArgb(a,255,255,255);
     SolidColorBrush InactiveLyric()=>LightTheme?Brush(220,75,76,85):Brush(220,181,182,192);
     SolidColorBrush ActiveLyric()=>new(OnAmbient(255));
-    double LyricOpacity(int row,int currentRow){if(accessibility.HighContrast)return 1;int distance=Math.Abs(row-currentRow);return distance==0?1:distance==1?.62:distance==2?.42:.24;}
+    double LyricOpacity(int row,int currentRow){if(accessibility.HighContrast)return 1;int distance=Math.Abs(row-currentRow);return distance==0?1:distance==1?.55:.30;}
     async void Loaded(object sender,RoutedEventArgs e)
     {
         if(ready)return;
@@ -204,12 +205,12 @@ public sealed partial class MainWindow : Window
         AlbumGrid.ItemsSource=visible.GroupBy(t=>t.AlbumKey).Select(g=>g.First()).ToList();
     }
     void Animate(UIElement element){if(ReduceMotion)return;var v=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element);var c=v.Compositor;var fade=c.CreateScalarKeyFrameAnimation();fade.InsertKeyFrame(0,0);fade.InsertKeyFrame(1,1);fade.Duration=TimeSpan.FromMilliseconds(300);v.StartAnimation("Opacity",fade);var slide=c.CreateVector3KeyFrameAnimation();slide.InsertKeyFrame(0,new(0,12,0));slide.InsertKeyFrame(1,Vector3.Zero);slide.Duration=TimeSpan.FromMilliseconds(280);Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetIsTranslationEnabled(element,true);v.StartAnimation("Translation",slide);}
-    void Fade(UIElement element,bool show){var v=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element);float to=show?1:0;if(ReduceMotion){v.StopAnimation("Opacity");v.Opacity=to;return;}var c=v.Compositor;var anim=c.CreateScalarKeyFrameAnimation();anim.InsertKeyFrame(0,v.Opacity);anim.InsertKeyFrame(1,to);anim.Duration=TimeSpan.FromMilliseconds(280);v.StartAnimation("Opacity",anim);}
-    void ShowLibrary(){nowVisible=false;NowPage.Visibility=Visibility.Collapsed;LibraryPage.Visibility=Visibility.Visible;QueuePanel.Visibility=Visibility.Collapsed;ApplyImmersiveLayout(false);Animate(LibraryPage);UpdateNavigation();}
+    void Fade(UIElement element,bool show){var v=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element);float to=show?1:0;if(ReduceMotion){v.StopAnimation("Opacity");v.Opacity=to;return;}var c=v.Compositor;var anim=c.CreateScalarKeyFrameAnimation();anim.InsertKeyFrame(1,to);anim.Duration=TimeSpan.FromMilliseconds(280);v.StartAnimation("Opacity",anim);}
+    void ShowLibrary(){ConnectedAnimation? back=null;if(nowVisible&&!ReduceMotion&&current!=null)back=ConnectedAnimationService.GetForCurrentView().PrepareToAnimate("coverBack",LargeCover);nowVisible=false;Ambient.SetPageVisible(false);NowPage.Visibility=Visibility.Collapsed;LibraryPage.Visibility=Visibility.Visible;QueuePanel.Visibility=Visibility.Collapsed;ApplyImmersiveLayout(false);LibraryPage.UpdateLayout();back?.TryStart(MiniCover);Fade(LibraryPage,true);Ambient.SetActive(activeVisuals);UpdateNavigation();}
     void NowBack_Click(object sender,RoutedEventArgs e)=>ShowLibrary();
     void Library_Click(object sender,RoutedEventArgs e){favoritesOnly=false;albumFilter=null;artistFilter=null;playlistFilter=null;PageTitle.Text="音乐库";showAlbums=true;showArtists=false;ShowLibrary();Filter();}
     void Favorites_Click(object sender,RoutedEventArgs e){favoritesOnly=true;albumFilter=null;artistFilter=null;playlistFilter=null;PageTitle.Text="我的收藏";showAlbums=false;showArtists=false;ShowLibrary();Filter();}
-    void Now_Click(object sender,RoutedEventArgs e){if(nowVisible)return;ExitMultiSelect();ConnectedAnimation? animation=null;if(!ReduceMotion&&current!=null)animation=ConnectedAnimationService.GetForCurrentView().PrepareToAnimate("cover",MiniCover);nowVisible=true;ApplyImmersiveLayout(true);LibraryPage.Visibility=Visibility.Collapsed;NowPage.Visibility=Visibility.Visible;NowPage.UpdateLayout();Animate(NowPage);animation?.TryStart(LargeCover);UpdateNavigation();}
+    void Now_Click(object sender,RoutedEventArgs e){if(nowVisible)return;ExitMultiSelect();ConnectedAnimation? animation=null;if(!ReduceMotion&&current!=null)animation=ConnectedAnimationService.GetForCurrentView().PrepareToAnimate("cover",MiniCover);nowVisible=true;Ambient.SetPageVisible(true);ApplyImmersiveLayout(true);LibraryPage.Visibility=Visibility.Collapsed;NowPage.Visibility=Visibility.Visible;NowPage.UpdateLayout();Fade(NowPage,true);EnterNowPlaying();animation?.TryStart(LargeCover);UpdateNavigation();}
     void ApplyImmersiveLayout(bool immersive){SidebarGlass.Visibility=immersive?Visibility.Collapsed:Visibility.Visible;SidebarColumn.Width=immersive?new GridLength(0):new GridLength(compactLayout?76:208);Workspace.ColumnSpacing=immersive?0:(compactLayout?16:28);Workspace.Margin=immersive?new Thickness(42,4,42,8):new Thickness(20,8,20,16);Grid.SetColumn(ContentHost,immersive?0:1);Grid.SetColumnSpan(ContentHost,immersive?2:1);Grid.SetColumn(QueuePanel,immersive?0:1);Grid.SetColumnSpan(QueuePanel,immersive?2:1);PlayerGlass.Margin=immersive?new Thickness(70,0,70,18):new Thickness(20,0,20,18);SignalDetails.Visibility=immersive?Visibility.Collapsed:Visibility.Visible;UpdateResponsiveLayout();}
     void SongsTab_Click(object sender,RoutedEventArgs e){ClearBrowseDetail();showAlbums=false;showArtists=false;Filter();}
     void AlbumsTab_Click(object sender,RoutedEventArgs e){ClearBrowseDetail();showAlbums=true;showArtists=false;Filter();}
@@ -276,13 +277,14 @@ public sealed partial class MainWindow : Window
             }
         }finally{SetBusy(false);playGate.Release();}
     }
-    async Task ShowTrack(Track t){NowTitle.Text=MiniTitle.Text=t.Title;NowArtist.Text=MiniArtist.Text=t.Artist;NowAlbum.Text=t.Album;CurrentHeart.Glyph=t.FavoriteGlyph;Total.Text=t.DurationText;await SetCover(t.Cover);mediaCancellation.Cancel();mediaCancellation.Dispose();mediaCancellation=new();lyricIndex=-2;_ = LoadMedia(t,mediaCancellation.Token);}
+    async Task ShowTrack(Track t){if(ambientTrackId!=t.Id){ambientTrackId=t.Id;Ambient.Burst();}UpdateTrackInformation(t);NowTitle.Text=MiniTitle.Text=t.Title;NowArtist.Text=MiniArtist.Text=t.Artist;NowAlbum.Text=t.Album;CurrentHeart.Glyph=t.FavoriteGlyph;Total.Text=t.DurationText;await SetCover(t.Cover);mediaCancellation.Cancel();mediaCancellation.Dispose();mediaCancellation=new();lyricIndex=-2;_ = LoadMedia(t,mediaCancellation.Token);}
     Task SetCover(string file)
     {
         var path=!string.IsNullOrEmpty(file)&&File.Exists(file)?file:null;
         Ambient.ThemeMode=LightTheme?"light":"dark";
         Ambient.SetSource(path);
-        CoverImage.Source=MiniCoverImage.Source=ReflectionImage.Source=path==null?null:new BitmapImage(new Uri(path));
+        CoverImage.Source=MiniCoverImage.Source=path==null?null:new BitmapImage(new Uri(path));
+        _=UpdateReflection(path);
         return Task.CompletedTask;
     }
     async Task LoadMedia(Track t,CancellationToken token)
@@ -303,12 +305,12 @@ public sealed partial class MainWindow : Window
     async void Tick(object? sender,object e)
     {
         if(audio==null||audio.Busy||closing)return;
-        lastState=audio.State();var state=lastState;
+        lastState=audio.State();var state=lastState;Ambient.SetPlaying(state.Playing&&!state.Failed&&!state.Ended);
         if(state.Failed){await audio.Stop();PlayIcon.Glyph="\uE768";Toast("播放已停止",state.Error.Length>0?state.Error:"音频设备断开或驱动状态发生变化。请重新选择输出设备。",true);return;}
-        if(state.Duration>0){SignalPath.Text=state.Chain;VolumeSlider.IsEnabled=!(state.Dsd&&state.Mode!=0);Elapsed.Text=Time(state.Position);Total.Text=Time(state.Duration);if(!seeking&&!seekTimer.IsEnabled){updatingSlider=true;SeekSlider.Maximum=state.Duration;SeekSlider.Value=state.Position;updatingSlider=false;}PlayIcon.Glyph=state.Playing?"\uE769":"\uE768";
+        if(state.Duration>0){FocusInformation(Math.Clamp((int)(state.Position/state.Duration*5),0,4));SignalPath.Text=state.Chain;VolumeSlider.IsEnabled=!(state.Dsd&&state.Mode!=0);Elapsed.Text=Time(state.Position);Total.Text=Time(state.Duration);if(!seeking&&!seekTimer.IsEnabled){updatingSlider=true;SeekSlider.Maximum=state.Duration;SeekSlider.Value=state.Position;updatingSlider=false;}PlayIcon.Glyph=state.Playing?"\uE769":"\uE768";
             int index=LyricsService.Current(lyricLines,state.Position+lyricOffset);if(index!=lyricIndex){if(lyricIndex>=0&&lyricIndex<lyricButtons.Count)((TextBlock)lyricButtons[lyricIndex].Content).Foreground=InactiveLyric();lyricIndex=index;if(index>=0&&index<lyricButtons.Count){var b=lyricButtons[index];((TextBlock)b.Content).Foreground=ActiveLyric();if(nowVisible){var point=b.TransformToVisual(LyricsPanel).TransformPoint(new(0,0));LyricsScroll.ChangeView(null,Math.Max(0,point.Y-LyricsScroll.ActualHeight*.36),null,ReduceMotion);}}
             // 参考玻璃风格：当前行全亮，其余按距离衰减透明度，像蒙在毛玻璃后面。
-            for(int i=0;i<lyricButtons.Count;i++)lyricButtons[i].Opacity=LyricOpacity(i,index);}
+            UpdateLyricFocus(index);}
             if(DateTime.UtcNow-lastSave>TimeSpan.FromSeconds(15)){lastSave=DateTime.UtcNow;prefs.LastPosition=state.Position;prefs.Queue=queue.Select(t=>t.Id).ToList();AppPaths.Save(prefs);}
         }
         if(state.Ended&&state.Playing){if(endSeen==DateTime.MinValue)endSeen=DateTime.UtcNow;else if(DateTime.UtcNow-endSeen>TimeSpan.FromMilliseconds(220)){endSeen=DateTime.MinValue;await Advance(1,true);}}

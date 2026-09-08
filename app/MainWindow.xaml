@@ -240,7 +240,7 @@
             </Grid.ColumnDefinitions>
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" x:Name="CoverScroll">
               <StackPanel VerticalAlignment="Center" Spacing="0" Margin="12,12,12,12">
-                <Border x:Name="LargeCover" CornerRadius="28" BorderBrush="{ThemeResource StrokeWeak}" BorderThickness="1" Background="{ThemeResource ButtonFill}" Height="310" MaxWidth="360" HorizontalAlignment="Center" Width="310" Translation="0,0,28">
+                <Border x:Name="LargeCover" CornerRadius="28" BorderBrush="{ThemeResource StrokeWeak}" BorderThickness="1" Background="{ThemeResource ButtonFill}" Height="310" MaxWidth="392" HorizontalAlignment="Center" Width="310" Translation="0,0,28">
                   <Border.Shadow>
                     <ThemeShadow />
                   </Border.Shadow>
@@ -251,8 +251,8 @@
                     <Image x:Name="CoverImage" Stretch="UniformToFill" />
                   </Grid>
                 </Border>
-                <Border x:Name="CoverReflection" Height="100" Width="310" MaxWidth="360" HorizontalAlignment="Center" Opacity="0.16" RenderTransformOrigin="0.5,0.5" CornerRadius="0,0,24,24">
-                  <Border.RenderTransform><ScaleTransform ScaleY="-1" /></Border.RenderTransform>
+                <Border x:Name="CoverReflection" Height="100" Width="310" MaxWidth="392" HorizontalAlignment="Center" Opacity="0.16" RenderTransformOrigin="0.5,0.5" CornerRadius="0,0,24,24">
+
 
                   <Image x:Name="ReflectionImage" Stretch="UniformToFill" />
                 </Border>
@@ -268,15 +268,18 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
               </Grid.RowDefinitions>
-              <Grid>
+              <Grid x:Name="ContentTabs">
+                <Border x:Name="ContentSelection" Height="2" Background="{ThemeResource Accent}" HorizontalAlignment="Left" VerticalAlignment="Bottom" CornerRadius="1" IsHitTestVisible="False" />
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Ellipse Width="5" Height="5" Fill="{ThemeResource Accent}" />
-                  <TextBlock Text="歌词" FontSize="12" Foreground="{ThemeResource TextSecondary}" />
+                  <Button x:Name="InfoViewButton" Content="曲目信息" Click="InfoView_Click" Style="{StaticResource QuietButton}" />
+                  <Button x:Name="LyricsViewButton" Content="歌词" Click="LyricsView_Click" Style="{StaticResource QuietButton}" />
                 </StackPanel>
                 <Button Click="FindLyrics_Click" Style="{StaticResource QuietButton}" HorizontalAlignment="Right" Padding="4" ToolTipService.ToolTip="联网查找歌词" AutomationProperties.Name="联网查找歌词">
                   <FontIcon Glyph="" FontSize="12" />
                 </Button>
               </Grid>
+              <ScrollViewer x:Name="InformationScroll" Grid.Row="1" Margin="0,20,0,0" VerticalScrollBarVisibility="Hidden" Opacity="0" IsHitTestVisible="False"><StackPanel x:Name="InformationPanel" Spacing="24" Padding="8,40,8,40" /></ScrollViewer>
               <ScrollViewer x:Name="LyricsScroll" Grid.Row="1" Margin="0,20,0,0" VerticalScrollBarVisibility="Hidden">
                 <StackPanel x:Name="LyricsPanel" Spacing="22" Padding="0,40,0,120" />
               </ScrollViewer>

@@ -123,6 +123,21 @@ public sealed partial class MainWindow
             await audio.Stop(); await Settle();
             Now_Click(this, new()); await Settle();
             Check("lyrics rendered", lyricButtons.Count > 0);
+            SwitchContent(true); await Settle(1000);
+            Check("track information uses real fields", InformationPanel.Children.Count==5 && InformationScroll.Opacity==1 && InformationScroll.IsHitTestVisible && !LyricsScroll.IsHitTestVisible);
+            for(int i=0;i<8;i++)SwitchContent(i%2==0);
+            SwitchContent(false); await Settle(1100);
+            Check("rapid panel switch leaves lyrics interactive", !InformationScroll.IsHitTestVisible && LyricsScroll.IsHitTestVisible && !informationVisible);
+            Check("reflected cover rendered", ReflectionImage.Source!=null);
+            prefs.VisualQuality=2; prefs.Aurora=true; prefs.ReducedTransparency=false; RefreshAppearance();
+            Check("full ambient has exactly three fields", Ambient.BlobCount==3 && Ambient.CurrentPalette.Length==3);
+            prefs.VisualQuality=1; RefreshAppearance(); Check("lightweight ambient has two fields",Ambient.BlobCount==2);
+            prefs.ReducedMotion=true; RefreshAppearance();Check("reduced motion stops ambient loops",!Ambient.MotionRunning);
+            SwitchContent(true);SwitchContent(false);
+            prefs.ReducedMotion=false;RefreshAppearance();
+            ShowLibrary();Check("library hides ambient motion",!Ambient.MotionRunning);
+            Now_Click(this,new());SetVisualActivity(true);await Settle();
+
             prefs.Theme = 2; ApplyTheme(); await Settle();
             Check("active lyric stays opaque after theme change", lyricIndex >= 0 && lyricButtons[lyricIndex].Opacity == 1);
             prefs.Theme = 1; ApplyTheme();

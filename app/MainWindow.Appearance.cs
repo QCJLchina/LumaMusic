@@ -20,6 +20,7 @@ public sealed partial class MainWindow
     readonly DispatcherTimer appearanceTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     LoadedImageSurface? glassBackground;
     CompositionCapabilities? capabilities;
+    bool windowFocused=true;
     bool appearanceReady, compactLayout, activeVisuals = true, reduceMotion;
     int effectiveVisualQuality=2;
     bool ReduceMotion => reduceMotion || prefs.ReducedMotion;
@@ -30,6 +31,8 @@ public sealed partial class MainWindow
 
     void InitializeAppearance()
     {
+        InitializeImmersiveMotion();
+        Activated += (_, e) => { windowFocused=e.WindowActivationState!=WindowActivationState.Deactivated; SetVisualActivity(windowFocused); };
         appearanceReady = true;
         Root.ActualThemeChanged += (_, _) => ApplyTheme();
         Root.SizeChanged += (_, _) => UpdateResponsiveLayout();
@@ -48,7 +51,7 @@ public sealed partial class MainWindow
         lastSystemAppearance = ReadSystemAppearance();
         appearanceTimer.Tick += (_, _) =>
         {
-            bool active = AppWindow.IsVisible && !(AppWindow.Presenter is OverlappedPresenter p && p.State == OverlappedPresenterState.Minimized);
+            bool active = windowFocused && AppWindow.IsVisible && !(AppWindow.Presenter is OverlappedPresenter p && p.State == OverlappedPresenterState.Minimized);
             if (activeVisuals != active) SetVisualActivity(active);
             var policy = ReadSystemAppearance();
             if (policy != lastSystemAppearance) { lastSystemAppearance = policy; RefreshAppearance(); }
@@ -131,7 +134,7 @@ public sealed partial class MainWindow
         VolumeSlider.Visibility = compactLayout ? Visibility.Collapsed : Visibility.Visible;
         CompactVolume.Visibility = compactLayout ? Visibility.Visible : Visibility.Collapsed;
         double available = Math.Max(160, (Root.ActualWidth - (nowVisible ? 120 : compactLayout ? 170 : 330)) / 2 - 70);
-        LargeCover.Width = LargeCover.Height = Math.Clamp(Math.Min(available, Root.ActualHeight - 300), 160, 390);
+        LargeCover.Width = LargeCover.Height = Math.Clamp(Math.Min(available, ((CoverScroll.ActualHeight>0?CoverScroll.ActualHeight:Root.ActualHeight-250)-140)/1.28), 160, 392);
         CoverReflection.Width = LargeCover.Width; CoverReflection.Height = Math.Clamp(LargeCover.Height * .28, 55, 105);
         QueuePanel.Width = Math.Min(340, Math.Max(260, Root.ActualWidth - 160));
         foreach (var button in PlaylistNav.Children.OfType<Button>())
@@ -160,8 +163,8 @@ public sealed partial class MainWindow
             if (ReduceMotion || selectedNavigation < 0) visual.Properties.InsertVector3("Translation", target);
             else
             {
-                var animation = visual.Compositor.CreateVector3KeyFrameAnimation();
-                animation.InsertKeyFrame(1, target); animation.Duration = TimeSpan.FromMilliseconds(260);
+                var animation = visual.Compositor.CreateSpringVector3Animation();
+                animation.FinalValue = target; animation.DampingRatio=1; animation.Period=TimeSpan.FromSeconds(.45);
                 visual.StartAnimation("Translation", animation);
             }
         }
