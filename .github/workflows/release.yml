@@ -137,6 +137,8 @@ jobs:
             gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
             if ($LASTEXITCODE -ne 0) { throw "Failed to delete draft release $($release.id)" }
           }
-          # auto-generated notes; edit the draft on the web (follow the v1.0.2 format) then publish
-          gh release create $tag --draft --verify-tag --title $tag --generate-notes @assets
+          # 初稿用 annotated tag 的说明（在 tag message 里照 v1.0.2 格式写）；不用 --generate-notes，避免英文 What's Changed + Full Changelog
+          $body = git tag -l --format='%(contents)' $tag
+          if ([string]::IsNullOrWhiteSpace(($body -join "`n"))) { $body = $tag }
+          gh release create $tag --draft --verify-tag --title $tag --notes ($body -join "`n") @assets
           if ($LASTEXITCODE -ne 0) { throw 'Failed to create draft release with assets' }
