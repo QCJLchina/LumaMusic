@@ -98,6 +98,18 @@ jobs:
         shell: powershell
         run: Compress-Archive -Path 'dist/LumaMusic/*' -DestinationPath 'dist/LumaMusic-win-x64.zip' -Force
 
+      # dispatch 干跑不发 release，产物留 artifact 供下载检查
+      - name: Upload build artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaMusic-${{ steps.version.outputs.app }}
+          path: |
+            dist/LumaMusic-win-x64.zip
+            dist/LumaMusic.msix
+            dist/LumaMusic.cer
+          retention-days: 14
+
       # draft：上传三件套后在网页上补 release notes（照 v1.0.2 格式）再手动 Publish
       - name: Create draft release
         if: github.event_name == 'push'
