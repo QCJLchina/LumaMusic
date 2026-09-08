@@ -398,7 +398,7 @@
         </StackPanel>
       </Grid>
     </controls:GlassSurface>
-    <InfoBar x:Name="Notice" Grid.Row="1" VerticalAlignment="Top" HorizontalAlignment="Center" MaxWidth="650" Margin="24,8,24,0" IsOpen="False" IsClosable="True" Severity="Informational" />
+    <InfoBar x:Name="Notice" Grid.Row="1" VerticalAlignment="Top" HorizontalAlignment="Center" MaxWidth="650" Margin="24,8,24,0" IsOpen="False" IsClosable="True" Severity="Informational" PointerEntered="Notice_PointerEntered" PointerExited="Notice_PointerExited" GotFocus="Notice_GotFocus" LostFocus="Notice_LostFocus" />
     <ProgressBar x:Name="BusyBar" Grid.Row="2" VerticalAlignment="Top" Height="2" IsIndeterminate="True" Visibility="Collapsed" Foreground="{ThemeResource Accent}" />
   </Grid>
 </Window>

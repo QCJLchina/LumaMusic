@@ -36,7 +36,7 @@ public sealed class GlassSurface : UserControl
     CompositionSurfaceBrush? lensBrush;
     CompositionGeometricClip? lensClip;
     CompositionPathGeometry? lensGeometry;
-    bool reduced, motionReduced;
+    bool reduced, motionReduced, lightweight;
     internal bool UsesSolidMaterial => material.Background is SolidColorBrush;
     internal bool HasLens => lens != null;
     public GlassSurface()
@@ -52,9 +52,9 @@ public sealed class GlassSurface : UserControl
         PointerEntered += (_, _) => Illuminate(.42f);
         PointerExited += (_, _) => Illuminate(0);
     }
-    public void Configure(bool reduceTransparency, bool reduceMotion, bool highContrast)
+    public void Configure(bool reduceTransparency, bool reduceMotion, bool highContrast, bool lightQuality=false)
     {
-        reduced = reduceTransparency || highContrast; motionReduced = reduceMotion;
+        reduced = reduceTransparency || highContrast; motionReduced = reduceMotion; lightweight = lightQuality;
         HighContrast = highContrast; Refresh(); UpdateLens();
     }
     bool HighContrast;
@@ -108,7 +108,7 @@ public sealed class GlassSurface : UserControl
     }
     public void UpdateLens()
     {
-        if (!IsLoaded || reduced || source == null || scene == null || ActualWidth <= 0 || ActualHeight <= 0)
+        if (!IsLoaded || reduced || lightweight || source == null || scene == null || ActualWidth <= 0 || ActualHeight <= 0)
         { ReleaseLens(); return; }
         try
         {

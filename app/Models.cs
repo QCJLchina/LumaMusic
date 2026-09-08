@@ -66,6 +66,8 @@ public class Preferences
     // 歌曲列表点击行为：false 单击播放（默认），true 双击播放
     public bool DoubleClickPlay {get;set;}
     public bool ReducedTransparency {get;set;}
+    // 0 自动，1 轻量，2 完整；旧配置缺失时按自动处理。
+    public int VisualQuality {get;set;}
     public DateTime LastUpdateCheck {get;set;}
     public DeviceProfile Profile=>Profiles.TryGetValue($"{DeviceBackend}:{DeviceId}",out var p)?p:Profiles[$"{DeviceBackend}:{DeviceId}"]=new(){Backend=DeviceBackend};
 }
@@ -75,8 +77,8 @@ public record ArtistSummary(string Name, int Albums, int Songs)
 {
     public string Description => $"{Albums} 张专辑 · {Songs} 首歌曲";
 }
-public record CoverCandidate(string Title,string Artist,string ReleaseId,string Thumbnail);
-public record SongVersion(long Id,string Name,string Artist,string Album)
+public record CoverCandidate(string Title,string Artist,string ReleaseId,string Thumbnail,string Source="");
+public record SongVersion(string Id,string Name,string Artist,string Album,string Source="",double Duration=0,bool Synced=true)
 {
-    public override string ToString()=>$"{Name}  /  {Artist}  ·  {Album}";
+    public override string ToString()=>string.IsNullOrEmpty(Source)?$"{Name}  /  {Artist}  ·  {Album}":$"[{Source}] {Name}  /  {Artist}  ·  {Album}";
 }

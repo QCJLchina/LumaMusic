@@ -21,6 +21,7 @@ public sealed partial class MainWindow
     LoadedImageSurface? glassBackground;
     CompositionCapabilities? capabilities;
     bool appearanceReady, compactLayout, activeVisuals = true, reduceMotion;
+    int effectiveVisualQuality=2;
     bool ReduceMotion => reduceMotion || prefs.ReducedMotion;
     partial void StartUiRegression();
     int selectedNavigation = -1;
@@ -65,14 +66,20 @@ public sealed partial class MainWindow
         bool energySaver = PowerManager.EnergySaverStatus == EnergySaverStatus.On;
         bool capable = capabilities == null || (capabilities.AreEffectsSupported() && capabilities.AreEffectsFast());
         bool solid = prefs.ReducedTransparency || highContrast || !effects || energySaver || !capable;
+        // WinUI exposes effect capability but not a stable dedicated-memory value on every
+        // unpackaged host. Automatic therefore starts conservatively (the 780M class of
+        // shared-memory adapters uses the lightweight path); users can opt into Complete.
+        effectiveVisualQuality = prefs.VisualQuality switch { 1 => 1, 2 => 2, _ => 1 };
+        if (effectiveVisualQuality==2 && !capable) effectiveVisualQuality=1;
         reduceMotion = prefs.ReducedMotion || !systemUi.AnimationsEnabled || energySaver || highContrast;
         InteractionMotion.Reduced = ReduceMotion || !activeVisuals;
         Ambient.Reduced = ReduceMotion;
         Ambient.Aurora = prefs.Aurora && !solid;
+        Ambient.Quality = effectiveVisualQuality;
         Ambient.ThemeMode = LightTheme ? "light" : "dark";
         Ambient.SetActive(activeVisuals);
         Ambient.Visibility = highContrast ? Visibility.Collapsed : Visibility.Visible;
-        foreach (var surface in GlassSurfaces) surface.Configure(solid || !activeVisuals, ReduceMotion || !activeVisuals, highContrast);
+        foreach (var surface in GlassSurfaces) surface.Configure(solid || !activeVisuals, ReduceMotion || !activeVisuals, highContrast, effectiveVisualQuality==1 && !solid);
         if (highContrast)
         {
             Root.Background = SystemBrush("SystemControlBackgroundAltHighBrush");

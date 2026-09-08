@@ -32,6 +32,7 @@ public sealed partial class MainWindow : Window
     readonly DispatcherTimer timer=new(){Interval=TimeSpan.FromMilliseconds(150)};
     readonly DispatcherTimer seekTimer=new(){Interval=TimeSpan.FromMilliseconds(350)};
     readonly DispatcherTimer searchTimer=new(){Interval=TimeSpan.FromMilliseconds(220)};
+    readonly DispatcherTimer noticeTimer=new(){Interval=TimeSpan.FromMilliseconds(100)};
     readonly SemaphoreSlim playGate=new(1,1);
     CancellationTokenSource mediaCancellation=new();CancellationTokenSource? scanCancellation;
     List<LyricLine> lyricLines=[];readonly List<Button> lyricButtons=[];
@@ -57,7 +58,8 @@ public sealed partial class MainWindow : Window
         SeekSlider.AddHandler(UIElement.PointerPressedEvent,new PointerEventHandler((_,_)=>{seeking=true;seekTimer.Stop();}),true);
         SeekSlider.AddHandler(UIElement.PointerReleasedEvent,new PointerEventHandler(async(_,_)=>{if(seeking){seeking=false;seekTimer.Stop();await SeekTo(SeekSlider.Value);}}),true);
         SeekSlider.AddHandler(UIElement.PointerCanceledEvent,new PointerEventHandler((_,_)=>{seeking=false;seekTimer.Stop();}),true);
-        Closed+=async(_,_)=>{closing=true;DisposeAppearance();timer.Stop();seekTimer.Stop();searchTimer.Stop();mediaCancellation.Cancel();scanCancellation?.Cancel();prefs.LastTrack=current?.Id??"";prefs.LastPosition=lastState.Position;prefs.Queue=queue.Select(t=>t.Id).ToList();AppPaths.Save(prefs);if(audio!=null){await audio.Stop();audio.Dispose();}tray?.Dispose();};
+        noticeTimer.Tick+=NoticeTimer_Tick;
+        Closed+=async(_,_)=>{closing=true;noticeTimer.Stop();DisposeAppearance();timer.Stop();seekTimer.Stop();searchTimer.Stop();mediaCancellation.Cancel();scanCancellation?.Cancel();prefs.LastTrack=current?.Id??"";prefs.LastPosition=lastState.Position;prefs.Queue=queue.Select(t=>t.Id).ToList();AppPaths.Save(prefs);if(audio!=null){await audio.Stop();audio.Dispose();}tray?.Dispose();};
         AppWindow.Closing+=(_,args)=>{if(prefs.CloseToTray&&!reallyClosing){args.Cancel=true;HideToTray();}};
     }
     void HideToTray()
@@ -147,7 +149,14 @@ public sealed partial class MainWindow : Window
         var arguments=Environment.GetCommandLineArgs().Skip(1).Where(File.Exists).ToList();if(arguments.Count>0)await Import(arguments);
         if(Environment.GetEnvironmentVariable("LUMA_DATA_DIR")==null)_=AutoCheckUpdate();
     }
-    void Toast(string title,string message="",bool error=false){if(closing)return;Notice.Title=title;Notice.Message=message;Notice.Severity=error?InfoBarSeverity.Warning:InfoBarSeverity.Informational;Notice.IsOpen=true;}
+    int noticeGeneration; DateTime noticeDeadline; bool noticeHeld; bool noticeProgress; Storyboard? noticeFade;
+    void Toast(string title,string message="",bool error=false){if(closing)return;noticeFade?.Stop();noticeProgress=false;noticeHeld=false;noticeGeneration++;Notice.Opacity=1;Notice.Title=title;Notice.Message=message;Notice.Severity=error?InfoBarSeverity.Warning:InfoBarSeverity.Informational;Notice.IsOpen=true;noticeDeadline=DateTime.UtcNow.AddSeconds(error?8:3);noticeTimer.Start();}
+    void SetProgressNotice(string title,string message=""){if(closing)return;noticeFade?.Stop();noticeProgress=true;noticeHeld=false;noticeGeneration++;Notice.Opacity=1;Notice.Title=title;Notice.Message=message;Notice.Severity=InfoBarSeverity.Informational;Notice.IsOpen=true;noticeTimer.Stop();}
+    void NoticeTimer_Tick(object? sender,object e){if(!Notice.IsOpen||noticeProgress||noticeHeld)return;if(DateTime.UtcNow<noticeDeadline)return;noticeTimer.Stop();var generation=noticeGeneration;if(prefs.ReducedMotion){Notice.IsOpen=false;return;}var fade=new DoubleAnimation{From=Notice.Opacity,To=0,Duration=new Duration(TimeSpan.FromMilliseconds(200))};Storyboard.SetTarget(fade,Notice);Storyboard.SetTargetProperty(fade,"Opacity");var sb=new Storyboard();noticeFade=sb;sb.Children.Add(fade);sb.Completed+=(_,_)=>{if(generation==noticeGeneration){Notice.IsOpen=false;Notice.Opacity=1;}if(noticeFade==sb)noticeFade=null;};sb.Begin();}
+    void Notice_PointerEntered(object sender,PointerRoutedEventArgs e){noticeHeld=true;}
+    void Notice_PointerExited(object sender,PointerRoutedEventArgs e){noticeHeld=false;}
+    void Notice_GotFocus(object sender,RoutedEventArgs e){noticeHeld=true;}
+    void Notice_LostFocus(object sender,RoutedEventArgs e){noticeHeld=false;}
     void SetBusy(bool busy){BusyBar.Visibility=busy?Visibility.Visible:Visibility.Collapsed;}
     static SolidColorBrush Brush(byte a,byte r,byte g,byte b)=>new(Color.FromArgb(a,r,g,b));
     static string Time(double seconds)=>TimeSpan.FromSeconds(Math.Max(0,seconds)).ToString(@"m\:ss");
@@ -199,7 +208,7 @@ public sealed partial class MainWindow : Window
         b.Click+=(_,_)=>{playlistFilter=p.Id;favoritesOnly=false;albumFilter=null;artistFilter=null;PageTitle.Text=p.Name;showAlbums=false;showArtists=false;ShowLibrary();Filter();};PlaylistNav.Children.Add(b);ConfigurePlaylistButton(b,p);}}
     async void NewPlaylist_Click(object sender,RoutedEventArgs e){var text=new TextBox{PlaceholderText="为这份心情取个名字",MaxLength=60};if(await Show(Dialog("新建播放列表",text,"创建"))==ContentDialogResult.Primary&&!string.IsNullOrWhiteSpace(text.Text)){library.CreatePlaylist(text.Text.Trim());RefreshPlaylists();}}
     async void ImportFolder_Click(object sender,RoutedEventArgs e){var picker=new FolderPicker();WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));picker.FileTypeFilter.Add("*");var folder=await picker.PickSingleFolderAsync();if(folder!=null){if(!prefs.Roots.Contains(folder.Path))prefs.Roots.Add(folder.Path);AppPaths.Save(prefs);await Import([folder.Path]);}}
-    async Task Import(IEnumerable<string> paths){if(scanCancellation!=null){Toast("正在扫描音乐，请稍候");return;}scanCancellation=new();SetBusy(true);try{var count=await library.Import(paths,new Progress<string>(s=>{Notice.Title="正在整理音乐库";Notice.Message=s;Notice.IsOpen=true;}),scanCancellation.Token);tracks=await Task.Run(library.Load);Filter();Toast("音乐库已更新",$"新增或更新 {count} 首歌曲");}catch(OperationCanceledException){}catch(Exception ex){Toast("导入未完成",ex.Message,true);}finally{scanCancellation?.Dispose();scanCancellation=null;SetBusy(false);}}
+    async Task Import(IEnumerable<string> paths){if(scanCancellation!=null){Toast("正在扫描音乐，请稍候");return;}scanCancellation=new();SetBusy(true);try{var count=await library.Import(paths,new Progress<string>(s=>SetProgressNotice("正在整理音乐库",s)),scanCancellation.Token);tracks=await Task.Run(library.Load);Filter();Toast("音乐库已更新",$"新增或更新 {count} 首歌曲");}catch(OperationCanceledException){}catch(Exception ex){Toast("导入未完成",ex.Message,true);}finally{scanCancellation?.Dispose();scanCancellation=null;SetBusy(false);if(noticeProgress){noticeProgress=false;Notice.IsOpen=false;}}}
     void Root_DragOver(object sender,DragEventArgs e){if(e.DataView.Contains(StandardDataFormats.StorageItems)){e.AcceptedOperation=DataPackageOperation.Copy;e.DragUIOverride.Caption="添加到 Luma 音乐库";}}
     async void Root_Drop(object sender,DragEventArgs e){if(e.DataView.Contains(StandardDataFormats.StorageItems)){var items=await e.DataView.GetStorageItemsAsync();await Import(items.Select(i=>i.Path));}}
     // 点击行为由设置决定：单击模式下 ItemClick 直接播放；双击模式下 ItemClick 只选中，DoubleTapped 才播放。
@@ -348,6 +357,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
         var transparency=new ToggleSwitch{Header="减少透明效果",IsOn=prefs.ReducedTransparency,OnContent="开启",OffContent="关闭"};
         var motion=new ToggleSwitch{Header="减少动态效果",IsOn=prefs.ReducedMotion,OnContent="开启",OffContent="关闭"};
         var closeBehavior=new RadioButtons{Header="关闭窗口时",ItemsSource=new[]{"直接退出","最小化到系统托盘"},SelectedIndex=prefs.CloseToTray?1:0,Margin=new Thickness(0,4,0,0)};
+        var qualityBox=new ComboBox{Header="视觉效果质量",ItemsSource=new[]{"自动（推荐）","轻量","完整"},SelectedIndex=Math.Clamp(prefs.VisualQuality,0,2),HorizontalAlignment=HorizontalAlignment.Stretch};
         var clickBehavior=new ComboBox{Header="列表点击播放方式",ItemsSource=new[]{"单击播放","双击播放"},SelectedIndex=prefs.DoubleClickPlay?1:0,HorizontalAlignment=HorizontalAlignment.Stretch};
         // 关于：版本号 + 手动检查更新（启动时也会自动检查一次，24 小时节流）
         var checkStatus=new TextBlock{FontSize=11,Foreground=Brush(200,172,194,176),TextWrapping=TextWrapping.Wrap,VerticalAlignment=VerticalAlignment.Center};
@@ -392,13 +402,13 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
         if(deviceBox.SelectedItem is AudioDevice d0)LoadProfile(d0);
         var panel=new StackPanel{Spacing=16,Width=470};
         void Section(string title,params UIElement[] elements){panel.Children.Add(new TextBlock{Text=title,FontSize=20,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,Margin=new Thickness(0,12,0,0)});foreach(var el in elements)panel.Children.Add(el);}
-        Section("外观",themeBox,auroraCheck,motion,transparency);
+        Section("外观",themeBox,auroraCheck,qualityBox,motion,transparency);
         Section("播放输出",deviceBox,modeBox,asioHint,asioInstall,asioTarget,dsdBox,dop,rate,downmix,mapping,hint);
         Section("通用",onlineCheck,closeBehavior,clickBehavior,scan,about);
         var dialog=Dialog("设置",new ScrollViewer{Content=panel,MaxHeight=530},"保存设置");
         void SaveAppearancePreferences(){
             prefs.Online=onlineCheck.IsOn;prefs.ReducedMotion=motion.IsOn;prefs.ReducedTransparency=transparency.IsOn;
-            prefs.CloseToTray=closeBehavior.SelectedIndex==1;prefs.DoubleClickPlay=clickBehavior.SelectedIndex==1;prefs.Theme=themeBox.SelectedIndex;prefs.Aurora=auroraCheck.IsOn;
+            prefs.CloseToTray=closeBehavior.SelectedIndex==1;prefs.DoubleClickPlay=clickBehavior.SelectedIndex==1;prefs.Theme=themeBox.SelectedIndex;prefs.Aurora=auroraCheck.IsOn;prefs.VisualQuality=Math.Clamp(qualityBox.SelectedIndex,0,2);
             ApplyTheme();AppPaths.Save(prefs);
         }
         dialog.PrimaryButtonClick+=async(_,args)=>{
@@ -449,7 +459,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
         async Task DoSearch(){
             try{
                 search.IsEnabled=false;status.Text="正在搜索…";list.ItemsSource=null;versions.Clear();
-                versions=await online.NetEaseSongs(title.Text.Trim(),artist.Text.Trim(),album.Text.Trim(),token);
+                versions=await online.SearchSongs(title.Text.Trim(),artist.Text.Trim(),album.Text.Trim(),token);
                 list.ItemsSource=versions.Select(v=>v.ToString()).ToList();
                 status.Text=versions.Count>0?$"找到 {versions.Count} 个版本，选中后点下方按钮":"没有找到，试试修改关键词";
             }catch(Exception ex){status.Text="搜索失败："+ex.Message;}
@@ -464,7 +474,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
             async Task Apply(){
                 try{
                     search.IsEnabled=false;status.Text=$"正在获取「{chosen.Name}」的歌词…";
-                    var text=await online.NetEaseLyrics(chosen.Id,token);
+                    var text=await online.Lyrics(chosen,token);
                     if(string.IsNullOrWhiteSpace(text)){status.Text="这个版本没有歌词，换一个版本试试。";return;}
                     library.SaveLyrics(t.Id,text,lyricOffset);dialog.Hide();
                     if(current?.Id==t.Id)DisplayLyrics(text);
@@ -492,7 +502,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
             try{
                 search.IsEnabled=false;status.Text="正在搜索专辑…";list.ItemsSource=null;candidates.Clear();
                 candidates=await online.Covers(album.Text.Trim(),artist.Text.Trim(),title.Text.Trim(),token);
-                list.ItemsSource=candidates.Select(c=>$"{c.Title}\n{c.Artist}").ToList();
+                list.ItemsSource=candidates.Select(c=>$"[{c.Source}] {c.Title}\n{c.Artist}").ToList();
                 if(candidates.Count>0)list.SelectedIndex=0;
                 status.Text=candidates.Count>0?$"找到 {candidates.Count} 个版本":"没有找到，试试修改关键词";
             }catch(Exception ex){status.Text="搜索失败："+ex.Message;}

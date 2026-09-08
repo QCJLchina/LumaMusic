@@ -29,6 +29,9 @@ public sealed class AmbientBackdrop : UserControl
     public event Action<string?>? BackgroundChanged;
     internal string? CurrentBackgroundPath {get;private set;}
     public bool Aurora {get;set;}=true;
+    // 0 自动已由窗口解析，1 轻量，2 完整。
+    int quality=2;
+    public int Quality { get=>quality; set { value=Math.Clamp(value,1,2); if(quality==value)return; quality=value; ApplyAuroraColors(); _=Load(lastPath); } }
     string themeMode="dark";
     public string ThemeMode{get=>themeMode;set{if(themeMode==value)return;themeMode=value;SetTint(Windows.UI.Color.FromArgb(255,115,115,130));_=Load(lastPath);}}
     static readonly SemaphoreSlim genGate=new(1,1);
@@ -44,8 +47,9 @@ public sealed class AmbientBackdrop : UserControl
     {
         SetTint(Color.FromArgb(255,115,115,130));
         Content=root;root.Children.Add(shown);root.Children.Add(entering);root.Children.Add(aurora);
+        int activeCount=quality==1?2:blobs.Length;
         for(int i=0;i<blobs.Length;i++){
-            blobs[i]=new Ellipse{Opacity=i==0?0.92f:0.64f};aurora.Children.Add(blobs[i]);
+            blobs[i]=new Ellipse{Opacity=i==0?0.92f:0.64f};blobs[i].Visibility=i<activeCount?Visibility.Visible:Visibility.Collapsed;aurora.Children.Add(blobs[i]);
             Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetIsTranslationEnabled(blobs[i],true);
         }
         Unloaded+=(_,_)=>SetActive(false);Loaded+=(_,_)=>SetActive(true);
@@ -68,7 +72,7 @@ public sealed class AmbientBackdrop : UserControl
         transition?.Stop();
         if(entering.Source!=null){shown.Source=entering.Source;entering.Source=null;}entering.Opacity=0;
         string? file=null;
-        try{if(!string.IsNullOrEmpty(path)&&File.Exists(path))file=await RenderBlurredAsync(path,mode);}
+        try{if(!string.IsNullOrEmpty(path)&&File.Exists(path))file=await RenderBlurredAsync(path,$"{mode}:{quality}");}
         catch(Exception e){Services.AppPaths.Log("Ambient: "+e.Message);}
         if(request!=generation)return;
         palette=file==null?[]:LoadColors(file);
@@ -93,7 +97,9 @@ public sealed class AmbientBackdrop : UserControl
     void ApplyAuroraColors()
     {
         if(palette.Length==0){ApplyAurora();return;}
+        int activeCount=quality==1?2:blobs.Length;
         for(int i=0;i<blobs.Length;i++){
+            if(i>=activeCount){var inactive=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(blobs[i]);inactive.StopAnimation("Translation");inactive.StopAnimation("Scale");inactive.StopAnimation("Opacity");continue;}
             var c=palette[i%palette.Length];
             var brush=new RadialGradientBrush{Center=new Point(.5,.5),RadiusX=.5,RadiusY=.5};
             brush.GradientStops.Add(new GradientStop{Offset=0,Color=Color.FromArgb(i==0?(byte)185:(byte)145,c.R,c.G,c.B)});
@@ -134,7 +140,7 @@ public sealed class AmbientBackdrop : UserControl
     // ---------- 离线渲染 ----------
     static async Task<string?> RenderBlurredAsync(string coverPath,string mode)
     {
-        bool light=mode=="light";
+        bool light=mode.StartsWith("light",StringComparison.Ordinal);
         var key=(light?"v5l-":"v5d-")+Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(coverPath.ToLowerInvariant()+File.GetLastWriteTimeUtc(coverPath).Ticks)))[..16].ToLowerInvariant();
         var outFile=System.IO.Path.Combine(Services.AppPaths.Cache,"ambient-"+key+".png");
         if(File.Exists(outFile))return outFile;
@@ -143,7 +149,8 @@ public sealed class AmbientBackdrop : UserControl
             if(File.Exists(outFile))return outFile;
             var device=CanvasDevice.GetSharedDevice();
             using var bmp=await CanvasBitmap.LoadAsync(device,coverPath);
-            float w=1920,h=1200;
+            float w=mode.EndsWith(":light",StringComparison.Ordinal)?640:1280;
+            float h=mode.EndsWith(":light",StringComparison.Ordinal)?400:800;
             using var target=new CanvasRenderTarget(device,w,h,96);
             using(var ds=target.CreateDrawingSession()){
                 ds.Clear(light?Color.FromArgb(255,243,243,246):Color.FromArgb(255,24,25,30));
@@ -151,7 +158,7 @@ public sealed class AmbientBackdrop : UserControl
                 // 放大 1.25 倍铺满，模糊采样不露边缘。
                 float scale=MathF.Max(w/iw,h/ih)*1.25f;
                 // 浅色版要真正提亮：封面压低不透明度让白底透出，再叠更强的白色渐变。
-                using var blur=new GaussianBlurEffect{Source=bmp,BlurAmount=MathF.Max(28,w*.024f),BorderMode=EffectBorderMode.Hard,Optimization=EffectOptimization.Balanced};
+                 using var blur=new GaussianBlurEffect{Source=bmp,BlurAmount=MathF.Max(18,w*.018f),BorderMode=EffectBorderMode.Hard,Optimization=EffectOptimization.Balanced};
                 using var sat=new SaturationEffect{Source=blur,Saturation=.82f};
                 ds.DrawImage(sat,new Rect((w-iw*scale)/2f,(h-ih*scale)/2f,iw*scale,ih*scale),new Rect(0,0,iw,ih),light?0.46f:0.62f);
                 CanvasGradientStop[] stops=light?new[]{
