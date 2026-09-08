@@ -116,9 +116,27 @@ jobs:
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'
+          $tag = $env:RELEASE_TAG
+          $assets = @('dist/LumaMusic-win-x64.zip', 'dist/LumaMusic.msix', 'dist/LumaMusic.cer')
+          foreach ($asset in $assets) {
+            if (!(Test-Path -LiteralPath $asset -PathType Leaf) -or (Get-Item -LiteralPath $asset).Length -eq 0) {
+              throw "release asset missing or empty: $asset"
+            }
+          }
+          # Use release IDs to clean only matching drafts; never delete a published release or tag.
+          $json = gh api --paginate --slurp "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to list releases' }
+          $releases = @($json | ConvertFrom-Json | ForEach-Object { $_ } | Where-Object { $_.tag_name -ceq $tag })
+          if (@($releases | Where-Object { !$_.draft }).Count -gt 0) {
+            throw "Release $tag is already published"
+          }
+          foreach ($release in $releases) {
+            gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
+            if ($LASTEXITCODE -ne 0) { throw "Failed to delete draft release $($release.id)" }
+          }
           # auto-generated notes; edit the draft on the web (follow the v1.0.2 format) then publish
-          gh release create $tag --draft --title $tag --generate-notes
-          gh release upload $tag dist/LumaMusic-win-x64.zip dist/LumaMusic.msix dist/LumaMusic.cer
+          gh release create $tag --draft --verify-tag --title $tag --generate-notes @assets
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to create draft release with assets' }

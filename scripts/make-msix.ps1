@@ -38,4 +38,15 @@ $msix=Join-Path $root 'dist/LumaMusic.msix'
 if($LASTEXITCODE){throw 'makeappx failed'}
 & "$sdk\x64\signtool.exe" sign /fd SHA256 /f $pfxPath /p $PfxPassword $msix
 if($LASTEXITCODE){throw 'signtool failed'}
+$certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+    $pfxPath, $PfxPassword,
+    [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+try {
+    # Export only the public certificate from the same PFX used for signing.
+    $cerPath = Join-Path $root 'dist/LumaMusic.cer'
+    [IO.File]::WriteAllBytes($cerPath, $certificate.Export(
+        [System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+} finally {
+    $certificate.Dispose()
+}
 Write-Output "MSIX ready: $msix (version $Version)"
