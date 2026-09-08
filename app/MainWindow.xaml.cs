@@ -26,9 +26,22 @@ public sealed partial class MainWindow : Window
     readonly Preferences prefs=AppPaths.Load();AudioService? audio;
     readonly ObservableCollection<Track> visible=[];readonly ObservableCollection<Track> queue=[];
     List<Track> tracks=[];List<AudioDevice> devices=[];Track? current;
-    ContentDialog? activeDialog;
-    // WinRT 同一时刻只允许一个 ContentDialog：开新框前自动关掉旧的，否则 COMException 直接闪退
-    async Task<ContentDialogResult> Show(ContentDialog d){try{activeDialog?.Hide();}catch{/**/}activeDialog=d;try{return await d.ShowAsync();}finally{if(activeDialog==d)activeDialog=null;}}
+    ContentDialog? activeDialog;bool updateChecking;
+    // WinRT 同一时刻只允许一个 ContentDialog：开新框前自动关掉旧的，否则 COMException 直接闪退。
+    // Hide() 返回时旧框可能还在关闭流程里，立刻 ShowAsync 新框会报"异步操作未正常启动"，要等旧框 Closed（超时兜底）。
+    async Task<ContentDialogResult> Show(ContentDialog d)
+    {
+        if(activeDialog!=null){
+            var old=activeDialog;var closed=new TaskCompletionSource();
+            void OnClosed(ContentDialog s,ContentDialogClosedEventArgs e)=>closed.TrySetResult();
+            old.Closed+=OnClosed;
+            try{old.Hide();}catch{/**/}
+            await Task.WhenAny(closed.Task,Task.Delay(300));
+            old.Closed-=OnClosed;
+        }
+        activeDialog=d;
+        try{return await d.ShowAsync();}finally{if(activeDialog==d)activeDialog=null;}
+    }
     readonly DispatcherTimer timer=new(){Interval=TimeSpan.FromMilliseconds(150)};
     readonly DispatcherTimer seekTimer=new(){Interval=TimeSpan.FromMilliseconds(350)};
     readonly DispatcherTimer searchTimer=new(){Interval=TimeSpan.FromMilliseconds(220)};
@@ -77,27 +90,35 @@ public sealed partial class MainWindow : Window
     {
         try{
             await Task.Delay(3000);
-            if(closing||(DateTime.UtcNow-prefs.LastUpdateCheck).TotalHours<24)return;
+            if(closing||updateChecking||(DateTime.UtcNow-prefs.LastUpdateCheck).TotalHours<24)return;
+            updateChecking=true;
             var info=await UpdateChecker.Latest(CancellationToken.None);
             prefs.LastUpdateCheck=DateTime.UtcNow;AppPaths.Save(prefs);
-            if(info!=null&&UpdateChecker.IsNewer(info.Tag)&&!closing)await OfferUpdate(info);
+            if(info!=null&&UpdateChecker.IsNewer(info.Tag)&&!closing){
+                // 用户正开着对话框（含设置）时静默跳过，避免弹窗叠弹窗
+                if(activeDialog==null)await OfferUpdate(info);
+                else AppPaths.Log("Update offer skipped: a dialog is open");
+            }
         }catch(Exception ex){AppPaths.Log("Update check: "+ex.Message);}
+        finally{updateChecking=false;}
     }
-    async Task OfferUpdate(UpdateChecker.UpdateInfo info)
+    async Task<bool> OfferUpdate(UpdateChecker.UpdateInfo info)
     {
         var text=new TextBlock{Text=$"最新版本 {info.Tag}（当前 v{UpdateChecker.CurrentVersion}）\n\n"+(string.IsNullOrEmpty(info.Notes)?"确认后开始更新。":info.Notes),TextWrapping=TextWrapping.Wrap,MaxWidth=420};
         var dlg=Dialog("发现新版本",text,UpdateChecker.IsPackaged?"下载并安装":"前往下载");
-        if(await dlg.ShowAsync()!=ContentDialogResult.Primary)return;
+        // 更新框常在设置对话框打开时弹出，必须走 Show() 守卫，裸 ShowAsync 会撞"单 ContentDialog"限制
+        if(await Show(dlg)!=ContentDialogResult.Primary)return false;
         if(UpdateChecker.IsPackaged){
             try{
                 SetBusy(true);Toast("正在下载更新…");
                 var file=await UpdateChecker.DownloadPackage(info.Tag,CancellationToken.None);
-                if(file==null){Toast("下载失败","发布资产里没有找到安装包，可前往发布页手动下载。",true);return;}
+                if(file==null){Toast("下载失败","发布资产里没有找到安装包，可前往发布页手动下载。",true);return true;}
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(file){UseShellExecute=true});
             }catch(Exception ex){Toast("下载更新失败",ex.Message,true);}
             finally{SetBusy(false);}
         }
         else Windows.System.Launcher.LaunchUriAsync(new Uri(info.Url));
+        return true;
     }
     void ApplyTheme(){
         Root.RequestedTheme=prefs.Theme switch{1=>ElementTheme.Dark,2=>ElementTheme.Light,_=>ElementTheme.Default};
@@ -366,14 +387,17 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
         about.Children.Add(new TextBlock{Text=$"LumaMusic  v{UpdateChecker.CurrentVersion}",FontSize=13,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold});
         var checkRow=new StackPanel{Orientation=Orientation.Horizontal,Spacing=10};checkRow.Children.Add(checkUpdate);checkRow.Children.Add(checkStatus);about.Children.Add(checkRow);
         checkUpdate.Click+=async(_,_)=>{
-            checkUpdate.IsEnabled=false;checkStatus.Text="正在检查更新…";
+            if(updateChecking)return;checkUpdate.IsEnabled=false;checkStatus.Text="正在检查更新…";updateChecking=true;
             try{
                 var info=await UpdateChecker.Latest(CancellationToken.None);
                 if(info==null)checkStatus.Text="无法连接更新服务，稍后再试。";
                 else if(!UpdateChecker.IsNewer(info.Tag)){checkStatus.Text="已是最新版本。";prefs.LastUpdateCheck=DateTime.UtcNow;AppPaths.Save(prefs);}
-                else{checkStatus.Text=$"发现新版本 {info.Tag}";await OfferUpdate(info);checkStatus.Text="";}
+                else{
+                    // Show() 守卫会先收起设置对话框再弹更新框；取消更新时重开设置，不打断用户
+                    if(!await OfferUpdate(info)){updateChecking=false;await Settings();}
+                }
             }catch(Exception ex){checkStatus.Text="检查失败："+ex.Message;}
-            finally{checkUpdate.IsEnabled=true;}
+            finally{updateChecking=false;checkUpdate.IsEnabled=true;}
         };
         var hint=new TextBlock{Text="独占模式会占用所选设备。DSD 透传时软件音量不可用，请使用 DAC 控制音量。",TextWrapping=TextWrapping.Wrap,FontSize=11,Foreground=Brush(200,172,194,176)};
         var scan=new Button{Content="重新扫描已添加的音乐文件夹"};scan.Click+=async(_,_)=>await Import(prefs.Roots);
