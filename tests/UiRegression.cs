@@ -25,6 +25,7 @@ public sealed partial class MainWindow
         void Check(string name, bool ok, object? detail = null)
         {
             checks.Add(new { name, passed = ok, detail });
+            AppPaths.Log("UI regression: " + name + " = " + ok);
             if (!ok) throw new InvalidOperationException(name + ": " + JsonSerializer.Serialize(detail));
         }
         async Task Settle(int milliseconds = 180) { await Task.Delay(milliseconds); Root.UpdateLayout(); }

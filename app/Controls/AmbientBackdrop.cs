@@ -45,7 +45,7 @@ public sealed class AmbientBackdrop : UserControl
     public bool Reduced {get=>reduced;set{if(reduced==value)return;reduced=value;ApplyAurora();}}
     public bool Aurora {get=>aurora;set{if(aurora==value)return;aurora=value;ApplyAurora();}}
     public int Quality {get=>quality;set{value=Math.Clamp(value,1,2);if(quality==value)return;quality=value;running=false;ApplyAurora();}}
-    public string ThemeMode {get=>themeMode;set{if(themeMode==value)return;themeMode=value;SetTint(default);ApplyState();_=Load(lastPath);}}
+    public string ThemeMode {get=>themeMode;set{if(themeMode==value)return;themeMode=value;SetTint(default);ApplyPalette();ApplyState();_=Load(lastPath);}}
     static Color[] Fallback()=>[Color.FromArgb(255,154,144,72),Color.FromArgb(255,47,74,53),Color.FromArgb(255,224,205,122)];
     public AmbientBackdrop()
     {
@@ -58,7 +58,7 @@ public sealed class AmbientBackdrop : UserControl
     }
     public void SetTint(Color color){bool light=ThemeMode=="light";root.Background=new SolidColorBrush(light?Color.FromArgb(255,242,239,233):Color.FromArgb(255,20,17,13));var brush=new RadialGradientBrush{Center=new(.5,.4),RadiusX=.75,RadiusY=.8};brush.GradientStops.Add(new(){Offset=.3,Color=Color.FromArgb(0,10,8,6)});brush.GradientStops.Add(new(){Offset=1,Color=light?Color.FromArgb(120,255,252,245):Color.FromArgb(140,10,8,6)});vignette.Fill=brush;}
     public void SetActive(bool active){if(Active==active)return;Active=active;ApplyAurora();}
-    public void SetPlaying(bool value){if(playing==value)return;playing=value;ApplyState();}
+    public void SetPlaying(bool value){if(playing==value)return;playing=value;ApplyPalette();ApplyState();}
     public void Shutdown(){generation++;SetActive(false);foreach(var b in effects)b?.Dispose();foreach(var m in motions)m?.Dispose();}
     void InitializeScene()
     {
@@ -110,6 +110,11 @@ public sealed class AmbientBackdrop : UserControl
         if(scene==null)return;float target=(ThemeMode=="light"?.35f:1)*(playing?1:.42f*.78f);
         var a=scene.Compositor.CreateScalarKeyFrameAnimation();a.InsertKeyFrame(1,target);a.Duration=TimeSpan.FromSeconds(1.4);
         if(Reduced||!Active){scene.StopAnimation("Opacity");scene.Opacity=target;}else scene.StartAnimation("Opacity",a);
+        // Keep the dark playback field open at the edges, without adding another light layer.
+        var edge=ElementCompositionPreview.GetElementVisual(vignette);
+        float edgeOpacity=ThemeMode=="dark"&&playing?.65f:1;
+        if(Reduced||!Active){edge.StopAnimation("Opacity");edge.Opacity=edgeOpacity;}
+        else {using var fade=scene.Compositor.CreateScalarKeyFrameAnimation();fade.InsertKeyFrame(1,edgeOpacity);fade.Duration=TimeSpan.FromSeconds(1.4);edge.StartAnimation("Opacity",fade);}
         foreach(var brush in effects){float blur=(quality==1?80:playing?110:140)/4f;var b=brush.Compositor.CreateScalarKeyFrameAnimation();b.InsertKeyFrame(1,blur);b.Duration=TimeSpan.FromSeconds(1.4);if(Reduced||!Active){brush.StopAnimation("Blur.BlurAmount");brush.Properties.InsertScalar("Blur.BlurAmount",blur);}else brush.StartAnimation("Blur.BlurAmount",b);}
     }
     public void Burst()
@@ -120,7 +125,18 @@ public sealed class AmbientBackdrop : UserControl
     void ApplyPalette()
     {
         if(scene==null)return;
-        for(int i=0;i<3;i++)for(int k=0;k<3;k++){var stop=gradients[i].ColorStops[k];var color=palette[i];color.A=k==0?(byte)255:k==1?(byte)100:(byte)0;var a=scene.Compositor.CreateColorKeyFrameAnimation();a.InsertKeyFrame(1,color);a.Duration=TimeSpan.FromSeconds(1.2);if(Reduced)stop.Color=color;else stop.StartAnimation("Color",a);}
+        bool illuminate=ThemeMode=="dark"&&playing;
+        for(int i=0;i<3;i++)for(int k=0;k<3;k++){
+            var stop=gradients[i].ColorStops[k];var color=palette[i];
+            // Lift the displayed field only: the extracted palette and UI accent stay intact.
+            if(illuminate){
+                static byte Lift(byte channel)=>(byte)Math.Round(channel+(255-channel)*.12);
+                color.R=Lift(color.R);color.G=Lift(color.G);color.B=Lift(color.B);
+            }
+            color.A=k==0?(byte)255:k==1?(illuminate?(byte)145:(byte)100):(byte)0;
+            using var a=scene.Compositor.CreateColorKeyFrameAnimation();a.InsertKeyFrame(1,color);a.Duration=TimeSpan.FromSeconds(1.2);
+            if(Reduced||!Active){stop.StopAnimation("Color");stop.Color=color;}else stop.StartAnimation("Color",a);
+        }
     }
     public void SetSource(string? path){if(path==lastPath)return;lastPath=path;_=Load(path);}
     async Task Load(string? path)

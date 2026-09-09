@@ -27,7 +27,7 @@
           </Grid.RowDefinitions>
           <StackPanel>
             <Grid x:Name="MainNavigation">
-              <Border Height="48" CornerRadius="24" Background="{ThemeResource ButtonFillStrong}" VerticalAlignment="Top" IsHitTestVisible="False" x:Name="NavSelection" />
+              <Border Height="{Binding Height, ElementName=LibraryNav}" CornerRadius="{Binding CornerRadius, ElementName=LibraryNav}" Background="{ThemeResource ButtonFillStrong}" VerticalAlignment="Top" IsHitTestVisible="False" x:Name="NavSelection" />
               <StackPanel Spacing="4">
                 <Button x:Name="LibraryNav" Style="{StaticResource NavButton}" Click="Library_Click" ToolTipService.ToolTip="音乐库" AutomationProperties.Name="音乐库">
                   <StackPanel Orientation="Horizontal" Spacing="15">
@@ -177,9 +177,16 @@
               </Grid>
             </Border>
             <GridView x:Name="AlbumGrid" Visibility="Collapsed" IsItemClickEnabled="True" ItemClick="Album_ItemClick" SelectionMode="None">
+              <GridView.ItemContainerStyle>
+                <Style TargetType="GridViewItem">
+                  <Setter Property="Padding" Value="4" />
+                  <Setter Property="Margin" Value="0,0,8,10" />
+                  <Setter Property="CornerRadius" Value="22" />
+                </Style>
+              </GridView.ItemContainerStyle>
               <GridView.ItemTemplate>
                 <DataTemplate x:DataType="local:Track">
-                  <StackPanel Width="160" Margin="5,5,12,15" Spacing="8">
+                  <StackPanel Width="160" Spacing="8">
                     <Border Height="160" CornerRadius="18" Background="{ThemeResource ButtonFill}" BorderBrush="{ThemeResource StrokeWeak}" BorderThickness="1">
                       <Grid>
                         <FontIcon Glyph="" FontSize="42" Foreground="{ThemeResource TextSecondary}" />
@@ -251,7 +258,7 @@
                     <Image x:Name="CoverImage" Stretch="UniformToFill" />
                   </Grid>
                 </Border>
-                <Border x:Name="CoverReflection" Height="100" Width="310" MaxWidth="392" HorizontalAlignment="Center" Opacity="0.16" RenderTransformOrigin="0.5,0.5" CornerRadius="0,0,24,24">
+                <Border x:Name="CoverReflection" Height="100" Width="310" MaxWidth="392" HorizontalAlignment="Center" Opacity="0.16" RenderTransformOrigin="0.5,0.5" CornerRadius="28,28,0,0">
 
 
                   <Image x:Name="ReflectionImage" Stretch="UniformToFill" />

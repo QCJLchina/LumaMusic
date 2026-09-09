@@ -323,7 +323,7 @@ public sealed partial class MainWindow : Window
     void Seek_Changed(object sender,RangeBaseValueChangedEventArgs e){if(!ready||updatingSlider)return;Elapsed.Text=Time(e.NewValue);if(!seeking){seekTimer.Stop();seekTimer.Start();}}
     void Volume_Changed(object sender,RangeBaseValueChangedEventArgs e){if(!ready)return;prefs.Volume=(float)e.NewValue/100;audio?.Volume(prefs.Volume);}
     void SetModeIcons(){ShuffleIcon.Foreground=prefs.Shuffle?AccentBrush():AccentDict()["TextSecondary"] as SolidColorBrush ?? new SolidColorBrush(OnAmbient(160));RepeatIcon.Foreground=prefs.Repeat>0?AccentBrush():AccentDict()["TextSecondary"] as SolidColorBrush ?? new SolidColorBrush(OnAmbient(160));RepeatIcon.Glyph=prefs.Repeat==2?"\uE8ED":"\uE8EE";}
-    void Shuffle_Click(object sender,RoutedEventArgs e){prefs.Shuffle=!prefs.Shuffle;SetModeIcons();AppPaths.Save(prefs);}
+    void Shuffle_Click(object sender,RoutedEventArgs e){prefs.Shuffle=!prefs.Shuffle;SetModeIcons();AppPaths.Save(prefs);Toast(prefs.Shuffle?"已开启随机播放":"已关闭随机播放");}
     void Repeat_Click(object sender,RoutedEventArgs e){prefs.Repeat=(prefs.Repeat+1)%3;SetModeIcons();AppPaths.Save(prefs);Toast(prefs.Repeat==0?"顺序播放":prefs.Repeat==1?"列表循环":"单曲循环");}
     void Favorite(Track t){t.Favorite=!t.Favorite;library.Save(t);if(current?.Id==t.Id)CurrentHeart.Glyph=t.FavoriteGlyph;}
     void FavoriteTrack_Click(object sender,RoutedEventArgs e){if(sender is Button{Tag:Track t})Favorite(t);}
