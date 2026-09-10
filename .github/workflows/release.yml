@@ -146,8 +146,24 @@ jobs:
             gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
             if ($LASTEXITCODE -ne 0) { throw "Failed to delete draft release $($release.id)" }
           }
-          # 初稿用 annotated tag 的说明（在 tag message 里照 v1.0.2 格式写）；不用 --generate-notes，避免英文 What's Changed + Full Changelog
-          $body = git tag -l --format='%(contents)' $tag
-          if ([string]::IsNullOrWhiteSpace(($body -join "`n"))) { $body = $tag }
+          # 初稿用 annotated tag 的说明（在 tag message 里照 v1.0.2 格式写）；不用 --generate-notes，避免英文 What's Changed + Full Changelog。
+          # 坑：checkout 会以 "+<commit-sha>:refs/tags/v1.1.5" 浅取，在本地造出的是**轻量 tag 引用**而非 annotated tag 对象，
+          #     此时 git tag --format='%(contents)' 返回的是提交标题（v1.1.5 实测踩到，草稿正文写成了"发布 v1.1.5：升级应用版本号"）。
+          #     所以优先用 API 直读 annotated tag 对象，取不到再退回本地 git。
+          $body = ''
+          try {
+            $refJson = (gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" 2>$null) -join "`n"
+            if ($refJson) {
+              $refObj = $refJson | ConvertFrom-Json
+              if ($refObj.object.type -eq 'tag') {
+                $tagJson = (gh api "repos/$env:GITHUB_REPOSITORY/git/tags/$($refObj.object.sha)" 2>$null) -join "`n"
+                if ($tagJson) { $body = ($tagJson | ConvertFrom-Json).message }
+              }
+            }
+          } catch { Write-Output "annotated tag lookup failed: $($_.Exception.Message)" }
+          if ([string]::IsNullOrWhiteSpace($body)) {
+            $body = (git tag -l --format='%(contents)' $tag) -join "`n"
+          }
+          if ([string]::IsNullOrWhiteSpace($body)) { $body = $tag }
           gh release create $tag --draft --verify-tag --title $tag --notes ($body -join "`n") @assets
           if ($LASTEXITCODE -ne 0) { throw 'Failed to create draft release with assets' }
