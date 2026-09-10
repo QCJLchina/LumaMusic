@@ -105,15 +105,27 @@ public sealed partial class MainWindow : Window
     async Task<bool> OfferUpdate(UpdateChecker.UpdateInfo info)
     {
         var text=new TextBlock{Text=$"最新版本 {info.Tag}（当前 v{UpdateChecker.CurrentVersion}）\n\n"+(string.IsNullOrEmpty(info.Notes)?"确认后开始更新。":info.Notes),TextWrapping=TextWrapping.Wrap,MaxWidth=420};
-        var dlg=Dialog("发现新版本",text,UpdateChecker.IsPackaged?"下载并安装":"前往下载");
+        var mode=UpdateChecker.Mode;
+        var dlg=Dialog("发现新版本",text,mode==UpdateChecker.UpdateMode.Portable?"前往下载":"下载并安装");
         // 更新框常在设置对话框打开时弹出，必须走 Show() 守卫，裸 ShowAsync 会撞"单 ContentDialog"限制
         if(await Show(dlg)!=ContentDialogResult.Primary)return false;
-        if(UpdateChecker.IsPackaged){
+        if(mode!=UpdateChecker.UpdateMode.Portable){
             try{
                 SetBusy(true);Toast("正在下载更新…");
-                var file=await UpdateChecker.DownloadPackage(info.Tag,CancellationToken.None);
+                // 安装版只认 LumaMusic-Setup.exe：按 .exe 取会误命中随包分发的 FlexASIOSetup.exe
+                var file=mode==UpdateChecker.UpdateMode.Installer
+                    ?await UpdateChecker.DownloadAsset(info.Tag,n=>n.Equals("LumaMusic-Setup.exe",StringComparison.OrdinalIgnoreCase),CancellationToken.None)
+                    :await UpdateChecker.DownloadPackage(info.Tag,CancellationToken.None);
                 if(file==null){Toast("下载失败","发布资产里没有找到安装包，可前往发布页手动下载。",true);return true;}
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(file){UseShellExecute=true});
+                if(mode==UpdateChecker.UpdateMode.Installer){
+                    // 安装器会先等应用退出再覆盖：必须让它独立于本进程，否则父进程一退安装器被一起带走
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(file){
+                        UseShellExecute=true,
+                        WorkingDirectory=System.IO.Path.GetDirectoryName(file)!,
+                        Arguments="/S /RELAUNCH=1 /D="+AppContext.BaseDirectory.TrimEnd(System.IO.Path.DirectorySeparatorChar)});
+                    reallyClosing=true;Close();
+                }
+                else System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(file){UseShellExecute=true});
             }catch(Exception ex){Toast("下载更新失败",ex.Message,true);}
             finally{SetBusy(false);}
         }
