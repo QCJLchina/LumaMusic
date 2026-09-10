@@ -17,7 +17,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RestorePackagesPath>../.packages</RestorePackagesPath>
     <ApplicationIcon>Assets/Luma.ico</ApplicationIcon>
-    <Version>1.1.4</Version>
+    <Version>1.1.5</Version>
   </PropertyGroup>
   <ItemGroup>
     <Content Update="Assets/AmbientNoise.png" CopyToOutputDirectory="PreserveNewest" />
