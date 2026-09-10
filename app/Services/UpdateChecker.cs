@@ -42,7 +42,11 @@ public static class UpdateChecker
     }
     // 便携版没有安装器语境，交给浏览器；其余把对应安装包下载到临时目录，交由安装器接管。
     public static Task<string?> DownloadPackage(string tag,CancellationToken token)
-        =>DownloadAsset(tag,n=>n.EndsWith(".msix",StringComparison.OrdinalIgnoreCase),token);
+        =>DownloadAsset(tag,IsMsixAsset,token);
+    // 发布资产里同时有 .msix/.cer/LumaMusic-Setup.exe，还有随包分发的 FlexASIOSetup.exe：
+    // 按 ".exe" 后缀取会命中 FlexASIO，必须精确匹配文件名。抽成静态谓词同时供回归测试。
+    public static bool IsMsixAsset(string name)=>name.EndsWith(".msix",StringComparison.OrdinalIgnoreCase);
+    public static bool IsInstallerAsset(string name)=>name.Equals("LumaMusic-Setup.exe",StringComparison.OrdinalIgnoreCase);
     // 发布资产里有 .zip/.msix/.cer/.exe，按后缀取会误命中，所以由调用方给精确的匹配条件。
     public static async Task<string?> DownloadAsset(string tag,Func<string,bool> match,CancellationToken token)
     {

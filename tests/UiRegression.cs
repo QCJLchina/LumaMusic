@@ -146,6 +146,16 @@ public sealed partial class MainWindow
             Check("appearance preference readback", AppPaths.Load().ReducedTransparency);
             prefs.ReducedTransparency = false; AppPaths.Save(prefs); RefreshAppearance();
 
+            // 发行形态决定更新方式：回归跑在未打包的开发版，且目录里没有安装器标记，必须是便携版。
+            Check("update mode resolves to portable", UpdateChecker.Mode == UpdateChecker.UpdateMode.Portable && !UpdateChecker.IsPackaged);
+            // 发布资产里既有 .msix/.cer 又有 LumaMusic-Setup.exe，还混着随包分发的 FlexASIOSetup.exe：
+            // 匹配谓词必须精确挑中目标，不能按 ".exe" 之类的宽后缀误命中。
+            Check("release asset matching", UpdateChecker.IsInstallerAsset("LumaMusic-Setup.exe")
+                && !UpdateChecker.IsInstallerAsset("FlexASIOSetup.exe") && !UpdateChecker.IsInstallerAsset("LumaMusic.msix")
+                && UpdateChecker.IsMsixAsset("LumaMusic.msix") && !UpdateChecker.IsMsixAsset("LumaMusic-Setup.exe"));
+            // 安装版判定读的是进程目录里的标记文件，与 packaging/LumaMusic.nsi 的 MARKER 同名，写错就永远认不出安装版。
+            Check("installer marker name matches packaging", UpdateChecker.InstallMarker == ".luma-nsis-install");
+
             // Click behavior: double-click mode routes playback through DoubleTapped only.
             Library_Click(this, new()); SongsTab_Click(this, new()); await Settle();
             Check("double-click preference default off", !prefs.DoubleClickPlay);

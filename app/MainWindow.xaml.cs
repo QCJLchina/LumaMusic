@@ -114,7 +114,7 @@ public sealed partial class MainWindow : Window
                 SetBusy(true);Toast("正在下载更新…");
                 // 安装版只认 LumaMusic-Setup.exe：按 .exe 取会误命中随包分发的 FlexASIOSetup.exe
                 var file=mode==UpdateChecker.UpdateMode.Installer
-                    ?await UpdateChecker.DownloadAsset(info.Tag,n=>n.Equals("LumaMusic-Setup.exe",StringComparison.OrdinalIgnoreCase),CancellationToken.None)
+                    ?await UpdateChecker.DownloadAsset(info.Tag,UpdateChecker.IsInstallerAsset,CancellationToken.None)
                     :await UpdateChecker.DownloadPackage(info.Tag,CancellationToken.None);
                 if(file==null){Toast("下载失败","发布资产里没有找到安装包，可前往发布页手动下载。",true);return true;}
                 if(mode==UpdateChecker.UpdateMode.Installer){
