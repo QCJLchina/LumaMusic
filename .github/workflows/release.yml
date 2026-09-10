@@ -1,6 +1,6 @@
 name: Release
 
-# push v* tag → 构建原生引擎 + 应用 → 打 zip/msix → 签名 → 创建 draft release 上传三件套。
+# push v* tag → 构建原生引擎 + 应用 → 打 NSIS 安装器/msix → 签名 → 创建 draft release 上传三件套。
 # workflow_dispatch 供手动验证构建（不发 release）。
 # 前提：仓库 Secrets 需配置 LUMA_PFX（pfx 的 base64）与 LUMA_PFX_PASSWORD（签名密码）。
 on:
@@ -95,9 +95,18 @@ jobs:
         shell: pwsh
         run: ./scripts/make-msix.ps1 -Version '${{ steps.version.outputs.app }}.0'
 
-      - name: Package portable zip
+      # NSIS 通常已随 windows runner 预装；缺失时才 choco 兜底，不必每次发版都多花一分钟安装
+      - name: Ensure NSIS
         shell: pwsh
-        run: Compress-Archive -Path 'dist/LumaMusic/*' -DestinationPath 'dist/LumaMusic-win-x64.zip' -Force
+        run: |
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (!(Test-Path $makensis)) { choco install nsis -y --no-progress }
+          if (!(Test-Path $makensis)) { throw "makensis missing after choco install: $makensis" }
+          & $makensis /VERSION
+
+      - name: Package installer
+        shell: pwsh
+        run: ./scripts/make-installer.ps1 -Version '${{ steps.version.outputs.app }}'
 
       # dispatch 干跑不发 release，产物留 artifact 供下载检查
       - name: Upload build artifacts
@@ -106,7 +115,7 @@ jobs:
         with:
           name: LumaMusic-${{ steps.version.outputs.app }}
           path: |
-            dist/LumaMusic-win-x64.zip
+            dist/LumaMusic-Setup.exe
             dist/LumaMusic.msix
             dist/LumaMusic.cer
           retention-days: 14
@@ -120,7 +129,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:RELEASE_TAG
-          $assets = @('dist/LumaMusic-win-x64.zip', 'dist/LumaMusic.msix', 'dist/LumaMusic.cer')
+          $assets = @('dist/LumaMusic-Setup.exe', 'dist/LumaMusic.msix', 'dist/LumaMusic.cer')
           foreach ($asset in $assets) {
             if (!(Test-Path -LiteralPath $asset -PathType Leaf) -or (Get-Item -LiteralPath $asset).Length -eq 0) {
               throw "release asset missing or empty: $asset"

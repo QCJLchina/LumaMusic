@@ -39,16 +39,18 @@ powershell scripts/build.ps1         # 应用构建（bundled dotnet，环境变
 
 ## MSIX 打包与发版
 
-- **自动发版（首选）**：push `v*` tag 触发 `.github/workflows/release.yml`——CI 构建原生引擎（含 LumaNativeTests）+ 应用，打 zip/msix，用 Secrets 里的 pfx 签名，创建 **draft release** 上传三件套。人在网页上补 release notes（照 v1.0.2 格式：`## LumaMusic x.y.z` + 新功能/修复/安装）后手动 Publish。
+- **自动发版（首选）**：push `v*` tag 触发 `.github/workflows/release.yml`——CI 构建原生引擎（含 LumaNativeTests）+ 应用，打 NSIS 安装器/msix，用 Secrets 里的 pfx 签名 msix，创建 **draft release** 上传三件套（安装器 / msix / cer）。人在网页上补 release notes（照 v1.0.2 格式：`## LumaMusic x.y.z` + 新功能/修复/安装）后手动 Publish。
 - 发版步骤：改 `app/LumaMusic.csproj` 的 `<Version>` → commit → `git tag v<版本>`（annotated，message 写发版内容，CI 会拿它当 release body 初稿）→ push main + tag。tag 与 csproj 版本不一致 CI 直接失败。
 - **签名证书**：仓库 Secrets `LUMA_PFX`（pfx 的 base64）+ `LUMA_PFX_PASSWORD`。pfx 正本放密码管理器；两台电脑本地打包时从密码管理器取 pfx 放 `dist/LumaMusic.pfx`，并设 `$env:LUMA_PFX_PASSWORD`。证书 Subject 硬规则与重建兜底见 `packaging/make-cert.ps1` 头注释（彻底丢了重建它，代价是用户卸载重装）。
-- 本地打包一条命令：`powershell scripts/make-msix.ps1 -Version x.y.z.0`（模板在 `packaging/`——AppxManifest + 4 张 logo PNG，改应用名/图标去那里；依赖 `dist/LumaMusic` 发布产物 + `dist/LumaMusic.pfx`）。绿色版 zip：`Compress-Archive dist/LumaMusic/* dist/LumaMusic-win-x64.zip`。
+- **NSIS 安装器（主推分发形式）**：`powershell scripts/make-installer.ps1 -Version x.y.z` → `dist/LumaMusic-Setup.exe`。脚本是 `packaging/LumaMusic.nsi`（用户级安装到 `%LOCALAPPDATA%\Programs\LumaMusic`，不弹 UAC），依赖 `dist/LumaMusic` 发布产物 + 本机 NSIS（`C:\Program Files (x86)\NSIS\makensis.exe`）。**不需要证书**：签名不会消除 SmartScreen 提示，安装器保持不签名。
+- **MSIX**：`powershell scripts/make-msix.ps1 -Version x.y.z.0`（模板在 `packaging/`——AppxManifest + 4 张 logo PNG，改应用名/图标去那里；依赖 `dist/LumaMusic` 发布产物 + `dist/LumaMusic.pfx`）。
 - **打包身份下 MRT Core 只认包根 `resources.pri`**（未打包模式才认 `LumaMusic.pri`）——手工打 MSIX 漏了它，应用装上后秒退且无任何崩溃事件/转储，这是"装上打不开"的第一嫌疑。脚本每次从 `LumaMusic.pri` 复制生成，勿删。
 - PS 5.1 编码坑（本项目实测踩过）：无 BOM 的 .ps1 按 GBK 解析（含中文的脚本必须带 BOM）；`Get-Content` 对无 BOM 的 UTF-8 文件按 GBK 读，含中文的 AppxManifest 会被毁（乱码+吃掉闭合引号，XML 报错位置还会错位误导）——读写 manifest 用 `[IO.File]::ReadAllText/WriteAllText`；正则替换串 `'$1'+数字` 被 .NET 当成更大组号，必须 `${1}`。
 - AppxManifest 的 `BackgroundColor` 合法格式是 6 位 hex（如 `#101918`），8 位 ARGB 反而 schema 报错。
 - Git Bash 调 makeappx/signtool/reg 等必须加 `MSYS_NO_PATHCONV=1`，否则 `/d` `/o` 之类开关被路径转换弄坏。
 - **签名证书 Subject 必须逐字符等于 AppxManifest 的 Publisher（`CN=LumaMusic`）**——多一个 O=/C= 后缀，signtool 对 MSIX 报 `SignerSign() failed 0x8007000b`（ERROR_BAD_FORMAT），无任何进一步提示，实测排查半天的坑（普通 PE Authenticode 签名正常，极具迷惑性）。
-- MSIX 版与绿色版数据共享 `%LOCALAPPDATA%\LumaMusic`（full-trust 包不虚拟化该目录）；用户装 MSIX 前需先导入 `.cer` 到受信任的根证书颁发机构。换证书（重建 pfx）后老用户需卸载重装。
+- MSIX 版与 NSIS 安装版数据共享 `%LOCALAPPDATA%\LumaMusic`（full-trust 包不虚拟化该目录）；用户装 MSIX 前需先导入 `.cer` 到受信任的根证书颁发机构。换证书（重建 pfx）后老用户需卸载重装。
+- **NSIS 相关坑（实测）**：① `.nsi` 里的中文默认按系统 ANSI 码页解析，中文会变乱码（快捷方式名直接烂掉）——`.nsi` 必须存 UTF-8 无 BOM，且 `makensis` 要加 `/INPUTCHARSET UTF8`；② `.ps1` 包装脚本含中文必须带 BOM（同 PS 5.1 坑）；③ `FileFunc.nsh` 的 `GetOptions` 搜索串必须带 `=`（写 `"RELAUNCH"` 只会取到 `"=1"`）；④ 覆盖安装运行中的应用时，NSIS 先把文件写进临时目录、等进程退出前才搬进 `$INSTDIR`，所以 `/RELAUNCH=1` 的自启动要延迟几秒而不是立刻 `Exec`；⑤ 安装器只在目录里存在 `.luma-nsis-install` 标记文件时才清空 `$INSTDIR`，避免误删用户自选目录，应用侧 `UpdateChecker` 也用同一标记判断"这是安装版"。
 
 ## 协作约定
 

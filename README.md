@@ -35,6 +35,15 @@ Windows 无损音乐播放器：WinUI 3 前端 + C++/BASS 原生音频引擎，�
 - Windows 10 2004（build 19041）或更高，x64
 - 无需安装 .NET 运行时与 Windows App SDK（自包含发布）
 
+## 安装
+
+从 [Releases](https://github.com/QCJLchina/LumaMusic/releases) 下载：
+
+- **安装版（推荐）**：下载 <code>LumaMusic-Setup.exe</code> 双击安装，默认装到 <code>%LOCALAPPDATA%\Programs\LumaMusic</code>，**不需要管理员权限**；开始菜单创建快捷方式，可从"应用和功能"正常卸载。
+- **MSIX**：先导入 <code>LumaMusic.cer</code>（受信任的根证书颁发机构），再安装 <code>LumaMusic.msix</code>。
+
+两种方式都支持应用内自动更新，共用 <code>%LOCALAPPDATA%\LumaMusic</code> 下的音乐库、缓存与设置；卸载不会删除这些用户数据。
+
 ## 从源码构建
 
 需要 Python 3（仅用于依赖引导）与 Visual Studio 2022（含 CMake、MSVC v143）。
