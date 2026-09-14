@@ -7,6 +7,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Variant,
     [string]$Profile = 'build/ui-preview',
     [string]$OutDir = 'build/preview',
+    [string]$Size = '',
     [string]$Python = 'python'
 )
 $ErrorActionPreference = 'Stop'
@@ -114,6 +115,8 @@ Get-ChildItem -LiteralPath $profilePath -Filter 'preview-*.txt' -ErrorAction Sil
 $env:LUMA_DATA_DIR = $profilePath
 $env:LUMA_UI_REGRESSION = '1'
 $env:LUMA_UI_PREVIEW = '1'
+# LUMA_PREVIEW_SIZE drives the window size, so README assets can be re-shot at their original 1320x860.
+if ($Size) { $env:LUMA_PREVIEW_SIZE = $Size }
 $process = Start-Process -FilePath $exe -WorkingDirectory $root -PassThru
 try {
     $hwnd = [IntPtr]::Zero
@@ -142,6 +145,7 @@ finally {
     $process.Refresh()
     if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
     Remove-Item Env:LUMA_UI_PREVIEW -ErrorAction SilentlyContinue
+    Remove-Item Env:LUMA_PREVIEW_SIZE -ErrorAction SilentlyContinue
     Remove-Item Env:LUMA_UI_REGRESSION -ErrorAction SilentlyContinue
     Remove-Item Env:LUMA_DATA_DIR -ErrorAction SilentlyContinue
 }

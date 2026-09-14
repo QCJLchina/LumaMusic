@@ -40,7 +40,11 @@ public sealed partial class MainWindow
             for (int i = 0; i < 400 && !ready; i++) await Task.Delay(50);
             prefs.Theme = 1; ApplyTheme();
             prefs.VisualQuality = 2; prefs.Aurora = true; prefs.ReducedTransparency = false; prefs.ReducedMotion = false; prefs.Online = false;
-            RefreshAppearance(); AppWindow.Resize(new(1600, 950)); await Settle(1200);
+            // README 预览图要按原尺寸出图，所以窗口大小可以用 LUMA_PREVIEW_SIZE=1320x860 覆盖。
+            var size = (1600, 950);
+            if (Environment.GetEnvironmentVariable("LUMA_PREVIEW_SIZE")?.Split('x') is [var rawWidth, var rawHeight]
+                && int.TryParse(rawWidth, out var width) && int.TryParse(rawHeight, out var height)) size = (width, height);
+            RefreshAppearance(); AppWindow.Resize(new(size.Item1, size.Item2)); await Settle(1200);
             Library_Click(this, new()); await Settle(1200);
             await Stage("library");
             // 白封面取色最亮，是对比度最差的一档；歌词与信息面板各拍一张，面板切换另有入场动画要等。
