@@ -40,7 +40,12 @@ powershell scripts/build.ps1         # 应用构建（bundled dotnet，环境变
 ## MSIX 打包与发版
 
 - **自动发版（首选）**：push `v*` tag 触发 `.github/workflows/release.yml`——CI 构建原生引擎（含 LumaNativeTests）+ 应用，打 NSIS 安装器/msix，用 Secrets 里的 pfx 签名 msix，创建 **draft release** 上传三件套（安装器 / msix / cer）。人在网页上补 release notes（照 v1.0.2 格式：`## LumaMusic x.y.z` + 新功能/修复/安装）后手动 Publish。
-- 发版步骤：改 `app/LumaMusic.csproj` 的 `<Version>` → commit → `git tag v<版本>`（annotated，message 写发版内容，CI 会拿它当 release body 初稿）→ push main + tag。tag 与 csproj 版本不一致 CI 直接失败。
+- 发版步骤：改 `app/LumaMusic.csproj` 的 `<Version>` → commit → 建 annotated tag（见下）→ push main + tag。tag 与 csproj 版本不一致 CI 直接失败；CI 拿 tag 说明当 release body 初稿。
+- **建 tag 必须用 `--cleanup=verbatim`**：`git tag -a -F notes.txt v1.2.3` 默认 cleanup 会把以 `#` 开头的行当注释删掉，发版说明的 `## LumaMusic x.y.z` 标题会被吃掉（v1.1.5 实测踩到）。正确写法：
+  ```
+  git tag -a --cleanup=verbatim v1.2.3 -F build/tag-v1.2.3.txt
+  git tag -l --format='%(contents)' v1.2.3   # 自检：首行应为 ## LumaMusic x.y.z
+  ```
 - **签名证书**：仓库 Secrets `LUMA_PFX`（pfx 的 base64）+ `LUMA_PFX_PASSWORD`。pfx 正本放密码管理器；两台电脑本地打包时从密码管理器取 pfx 放 `dist/LumaMusic.pfx`，并设 `$env:LUMA_PFX_PASSWORD`。证书 Subject 硬规则与重建兜底见 `packaging/make-cert.ps1` 头注释（彻底丢了重建它，代价是用户卸载重装）。
 - **NSIS 安装器（主推分发形式）**：`powershell scripts/make-installer.ps1 -Version x.y.z` → `dist/LumaMusic-Setup.exe`。脚本是 `packaging/LumaMusic.nsi`（用户级安装到 `%LOCALAPPDATA%\Programs\LumaMusic`，不弹 UAC），依赖 `dist/LumaMusic` 发布产物 + 本机 NSIS（`C:\Program Files (x86)\NSIS\makensis.exe`）。**不需要证书**：签名不会消除 SmartScreen 提示，安装器保持不签名。
 - **MSIX**：`powershell scripts/make-msix.ps1 -Version x.y.z.0`（模板在 `packaging/`——AppxManifest + 4 张 logo PNG，改应用名/图标去那里；依赖 `dist/LumaMusic` 发布产物 + `dist/LumaMusic.pfx`）。
