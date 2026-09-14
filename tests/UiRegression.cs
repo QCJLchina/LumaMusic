@@ -12,11 +12,56 @@ public sealed partial class MainWindow
 {
     partial void StartUiRegression()
     {
+        // 预览模式只摆放画面状态给截图用，不做断言；与回归共用同一个仅回归构建编译的入口。
+        if (Environment.GetEnvironmentVariable("LUMA_UI_PREVIEW") == "1") { _ = RunUiPreview(); return; }
         if (Environment.GetEnvironmentVariable("LUMA_UI_REGRESSION") != "1") return;
         string expected = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "build")) + Path.DirectorySeparatorChar;
         if (!Path.GetFullPath(AppPaths.Root).StartsWith(expected, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("UI regression requires a build/ profile and repository working directory.");
         _ = RunUiRegression();
+    }
+
+    // 人工审查深色界面对比度用：每个阶段写好标记文件后等 build/preview-tools/preview.ps1 截完图 ack，
+    // 截图因此总是落在动效稳定之后，而不是靠固定睡眠去赌。
+    async Task RunUiPreview()
+    {
+        async Task Settle(int milliseconds) { await Task.Delay(milliseconds); Root.UpdateLayout(); }
+        string Marker(string name) => Path.Combine(AppPaths.Root, "preview-" + name + ".txt");
+        string State() => JsonSerializer.Serialize(new { theme = Root.ActualTheme.ToString(), playing = lastState.Playing, failed = lastState.Failed, track = current?.Id, palette = Ambient.CurrentPalette.Select(c => c.ToString()).ToArray() });
+        async Task Stage(string name)
+        {
+            // 截图进程会把焦点从窗口拿走；这里按"窗口在前台"的材质策略固定住，才是审查时要看的那一版。
+            windowFocused = true; SetVisualActivity(true); await Settle(700);
+            File.WriteAllText(Marker(name), State());
+            for (int i = 0; i < 600 && !File.Exists(Marker(name + ".ack")); i++) await Task.Delay(50);
+        }
+        try
+        {
+            for (int i = 0; i < 400 && !ready; i++) await Task.Delay(50);
+            prefs.Theme = 1; ApplyTheme();
+            prefs.VisualQuality = 2; prefs.Aurora = true; prefs.ReducedTransparency = false; prefs.ReducedMotion = false; prefs.Online = false;
+            RefreshAppearance(); AppWindow.Resize(new(1600, 950)); await Settle(1200);
+            Library_Click(this, new()); await Settle(1200);
+            await Stage("library");
+            // 白封面取色最亮，是对比度最差的一档；歌词与信息面板各拍一张，面板切换另有入场动画要等。
+            await Play(tracks.First(t => t.Id == "ui-9-0")); Now_Click(this, new()); await Settle(3600);
+            SwitchContent(false); await Settle(1600); await Stage("now-white-lyrics");
+            SwitchContent(true); await Settle(1600); await Stage("now-white-info");
+            await Play(tracks.First(t => t.Id == "ui-10-0")); SwitchContent(false); await Settle(3600);
+            await Stage("now-vivid-lyrics");
+            audio?.Pause(true); await Settle(2400);
+            await Stage("paused");
+            // 冻结动效后再拍一组：漂移与呼吸停掉、光斑位置与透明度固定，此时前后两次的差异只剩这次改动的参数，
+            // 不会被动画相位带偏，指标才可以当成结论用。
+            prefs.ReducedMotion = true; RefreshAppearance(); await Settle(1400);
+            await Play(tracks.First(t => t.Id == "ui-9-0")); await Settle(2400);
+            await Stage("static-white");
+            await Play(tracks.First(t => t.Id == "ui-10-0")); await Settle(2400);
+            await Stage("static-vivid");
+            if (audio != null) await audio.Stop();
+        }
+        catch (Exception ex) { AppPaths.Log("UI preview failed: " + ex); File.WriteAllText(Marker("error"), ex.ToString()); }
+        finally { File.WriteAllText(Marker("done"), ""); reallyClosing = true; Close(); }
     }
 
     async Task RunUiRegression()
