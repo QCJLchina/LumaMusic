@@ -110,11 +110,9 @@ public sealed class AmbientBackdrop : UserControl
         if(scene==null)return;float target=(ThemeMode=="light"?.35f:1)*(playing?1:.42f*.78f);
         var a=scene.Compositor.CreateScalarKeyFrameAnimation();a.InsertKeyFrame(1,target);a.Duration=TimeSpan.FromSeconds(1.4);
         if(Reduced||!Active){scene.StopAnimation("Opacity");scene.Opacity=target;}else scene.StartAnimation("Opacity",a);
-        // Keep the dark playback field open at the edges, without adding another light layer.
-        var edge=ElementCompositionPreview.GetElementVisual(vignette);
-        float edgeOpacity=ThemeMode=="dark"&&playing?.65f:1;
-        if(Reduced||!Active){edge.StopAnimation("Opacity");edge.Opacity=edgeOpacity;}
-        else {using var fade=scene.Compositor.CreateScalarKeyFrameAnimation();fade.InsertKeyFrame(1,edgeOpacity);fade.Duration=TimeSpan.FromSeconds(1.4);edge.StartAnimation("Opacity",fade);}
+        // 暗角是设计稿指定的文字对比度层（docs/redesign/环境光设计方案.md 第五节），深色播放也不削：
+        // 想更通透只能从光斑本身要，拿它换氛围等于用可读性付账。
+        var edge=ElementCompositionPreview.GetElementVisual(vignette);edge.StopAnimation("Opacity");edge.Opacity=1;
         foreach(var brush in effects){float blur=(quality==1?80:playing?110:140)/4f;var b=brush.Compositor.CreateScalarKeyFrameAnimation();b.InsertKeyFrame(1,blur);b.Duration=TimeSpan.FromSeconds(1.4);if(Reduced||!Active){brush.StopAnimation("Blur.BlurAmount");brush.Properties.InsertScalar("Blur.BlurAmount",blur);}else brush.StartAnimation("Blur.BlurAmount",b);}
     }
     public void Burst()
@@ -125,15 +123,16 @@ public sealed class AmbientBackdrop : UserControl
     void ApplyPalette()
     {
         if(scene==null)return;
+        // 提亮收敛到光斑核心：外圈 alpha 与提亮系数都低于 v1.1.4，避免文字压在整片发亮的中间场上。
         bool illuminate=ThemeMode=="dark"&&playing;
         for(int i=0;i<3;i++)for(int k=0;k<3;k++){
             var stop=gradients[i].ColorStops[k];var color=palette[i];
             // Lift the displayed field only: the extracted palette and UI accent stay intact.
             if(illuminate){
-                static byte Lift(byte channel)=>(byte)Math.Round(channel+(255-channel)*.12);
+                static byte Lift(byte channel)=>(byte)Math.Round(channel+(255-channel)*.06);
                 color.R=Lift(color.R);color.G=Lift(color.G);color.B=Lift(color.B);
             }
-            color.A=k==0?(byte)255:k==1?(illuminate?(byte)145:(byte)100):(byte)0;
+            color.A=k==0?(byte)255:k==1?(illuminate?(byte)110:(byte)100):(byte)0;
             using var a=scene.Compositor.CreateColorKeyFrameAnimation();a.InsertKeyFrame(1,color);a.Duration=TimeSpan.FromSeconds(1.2);
             if(Reduced||!Active){stop.StopAnimation("Color");stop.Color=color;}else stop.StartAnimation("Color",a);
         }
