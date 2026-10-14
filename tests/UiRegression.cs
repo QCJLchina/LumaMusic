@@ -299,6 +299,35 @@ public sealed partial class MainWindow
             Sort_Click(SortTitle, new()); await Settle();
             Check("sort returns to library order", visible.Select(t => t.Id).SequenceEqual(libraryOrder));
 
+            // ---- ReplayGain：只读文件标签，走真实解析 ----
+            var rgExpected = System.Text.Json.JsonDocument.Parse(
+                File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "build", "ui-fixtures", "replaygain-expected.json")));
+            var rgGain = rgExpected.RootElement.GetProperty("trackGain").GetDouble();
+            var rgFile = Path.Combine(Environment.CurrentDirectory, "build", "ui-fixtures", "replaygain-sample.wav");
+            await Import([rgFile]);
+            var rgTrack = tracks.FirstOrDefault(t => t.Path.Equals(rgFile, StringComparison.OrdinalIgnoreCase));
+            Check("replaygain tag parsed from file", rgTrack != null && Math.Abs(rgTrack.ReplayGainDb - rgGain) < .01 && rgTrack.GainSource == "track",
+                new { found = rgTrack?.ReplayGainDb, expected = rgGain, source = rgTrack?.GainSource });
+            // 关闭时增益必须是 1（不改变任何音频数据）。
+            var profileNoGain = prefs.Profile;
+            profileNoGain.ReplayGain = 0;
+            Check("replaygain off yields unity gain", Math.Abs(GainFor(rgTrack, profileNoGain) - 1f) < 1e-6);
+            profileNoGain.ReplayGain = 2;
+            Check("replaygain dB converts to linear gain",
+                Math.Abs(GainFor(rgTrack, profileNoGain) - Math.Pow(10, rgGain / 20)) < 1e-4,
+                GainFor(rgTrack, profileNoGain));
+            profileNoGain.ReplayGain = 1;
+            // 只有专辑标签的文件在"专辑增益"模式下不做任何修正（增益为 1.0），而不是被静音。
+            Check("album mode without album tag leaves gain at unity", Math.Abs(GainFor(rgTrack, profileNoGain) - 1f) < 1e-6,
+                GainFor(rgTrack, profileNoGain));
+            // 播放时引擎收到的确实是这个倍率（真出声验证由 audio_smoke 覆盖）。
+            prefs.Profile.ReplayGain = 2;
+            await Play(rgTrack); await Settle(900);
+            Check("engine receives replaygain", Math.Abs(lastState.Gain - Math.Pow(10, rgGain / 20)) < 1e-4,
+                new { reported = lastState.Gain });
+            await audio.Stop();
+            prefs.Profile.ReplayGain = 0;
+
             // ---- 播放列表：保序、重命名、重排、导出 ----
             var pl = library.Playlists().First();
             library.ClearPlaylist(pl.Id);

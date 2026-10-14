@@ -74,6 +74,9 @@ struct Engine {
     std::vector<uint8_t> pending;size_t pendingOffset=0;
     int mapping[8]{0,1,2,3,4,5,6,7};
     bool dopMarker=false;
+    // ReplayGain 音量修正（线性倍率）。只乘在 PCM 浮点样本上，
+    // 不重采样、不改 DSD 字节流，所以不破坏位完美回放路径。
+    float gainLinear=1.f;
     // 输出设备被系统移除（拔 USB DAC / 驱动重置），与解码失败区分开以便自动恢复。
     std::atomic<bool> deviceGone{false};
     ~Engine(){stop();}
@@ -119,7 +122,9 @@ struct Engine {
                 dop_silence((float*)((uint8_t*)buffer+n),(length-n)/frameSize(),channels,marker);
             }else memset((uint8_t*)buffer+n,0,length-n);
         }
-        if(!(dsd&&dsdMode!=0)){auto samples=(float*)buffer;float gain=volume.load();if(gain!=1.f)for(size_t i=0;i<n/4;++i)samples[i]*=gain;}
+        // ReplayGain 折进软件音量：DSD 透传/原生路径不适用（那里没有浮点样本可乘），
+        // 这是位完美的正确行为，不该绕过。
+        if(!(dsd&&dsdMode!=0)){auto samples=(float*)buffer;float g=volume.load()*gainLinear;if(g!=1.f)for(size_t i=0;i<n/4;++i)samples[i]*=g;}
         return length;
     }
     static DWORD CALLBACK wasapiProc(void* p,DWORD n,void* user){return ((Engine*)user)->pull(p,n);}
@@ -264,12 +269,12 @@ static std::unique_ptr<Engine> engine;
 API int luma_init(const wchar_t* directory){std::lock_guard lock(gate);try{appDir=directory;SetDllDirectoryW(directory);BASS_SetConfig(BASS_CONFIG_UNICODE,TRUE);if(!BASS_Init(0,44100,0,nullptr,nullptr)&&BASS_ErrorGetCode()!=BASS_ERROR_ALREADY)throw std::runtime_error("BASS 初始化失败");for(auto name:{L"bassflac.dll",L"bassape.dll",L"bassalac.dll",L"bassopus.dll",L"basswv.dll"}){auto p=BASS_PluginLoad((appDir/name).c_str(),BASS_UNICODE);if(p)plugins.push_back(p);}initialized=true;return 1;}catch(const std::exception& e){errorText=e.what();return 0;}}
 API const char* luma_error(){std::lock_guard lock(gate);resultText=errorText;return resultText.c_str();}
 API const char* luma_devices(){std::lock_guard lock(gate);std::ostringstream o;o<<"[";bool comma=false;BASS_WASAPI_DEVICEINFO d{};for(int i=0;BASS_WASAPI_GetDeviceInfo(i,&d);++i){if(!(d.flags&BASS_DEVICE_ENABLED)||(d.flags&(BASS_DEVICE_INPUT|BASS_DEVICE_LOOPBACK)))continue;if(comma)o<<",";comma=true;o<<"{\"index\":"<<i<<",\"backend\":1,\"name\":"<<quote(d.name?d.name:"")<<",\"id\":"<<quote(d.id?d.id:"")<<",\"default\":"<<((d.flags&BASS_DEVICE_DEFAULT)?"true":"false")<<",\"channels\":"<<d.mixchans<<",\"rate\":"<<d.mixfreq<<"}";}BASS_ASIO_DEVICEINFO a{};for(int i=0;BASS_ASIO_GetDeviceInfo(i,&a);++i){if(comma)o<<",";comma=true;o<<"{\"index\":"<<i<<",\"backend\":2,\"name\":"<<quote(a.name?a.name:"")<<",\"id\":"<<quote(a.driver?a.driver:"")<<",\"default\":false,\"channels\":0,\"rate\":0}";}o<<"]";resultText=o.str();return resultText.c_str();}
-API int luma_open(const wchar_t* file,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,const int* map,float volume,double position,double limit){std::lock_guard lock(gate);try{engine.reset();auto next=std::make_unique<Engine>();next->file=file;next->track=track;next->backend=backend;next->device=device;next->dsdMode=mode;next->pcmRate=pcmRate;next->forceRate=forceRate;next->downmix=downmix!=0;next->volume=volume;next->limit=std::isfinite(limit)?limit:0;next->origin=next->limit>0?std::min(next->limit,std::max(0.0,position)):0;if(map){for(int i=0;i<8;++i){next->mapping[i]=map[i];for(int j=0;j<i;++j)if(map[i]==map[j])throw std::runtime_error("通道映射不能重复");}}next->open(position);engine=std::move(next);engine->resume();errorText.clear();return 1;}catch(const std::exception& e){errorText=e.what();engine.reset();return 0;}}
+API int luma_open(const wchar_t* file,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,const int* map,float volume,double position,double limit,float gainLinear){std::lock_guard lock(gate);try{engine.reset();auto next=std::make_unique<Engine>();next->file=file;next->track=track;next->backend=backend;next->device=device;next->dsdMode=mode;next->pcmRate=pcmRate;next->forceRate=forceRate;next->downmix=downmix!=0;next->volume=volume;next->gainLinear=(std::isfinite(gainLinear)&&gainLinear>0)?std::clamp(gainLinear,0.01f,4.f):1.f;next->limit=std::isfinite(limit)?limit:0;next->origin=next->limit>0?std::min(next->limit,std::max(0.0,position)):0;if(map){for(int i=0;i<8;++i){next->mapping[i]=map[i];for(int j=0;j<i;++j)if(map[i]==map[j])throw std::runtime_error("通道映射不能重复");}}next->open(position);engine=std::move(next);engine->resume();errorText.clear();return 1;}catch(const std::exception& e){errorText=e.what();engine.reset();return 0;}}
 API int luma_pause(int pause){std::lock_guard lock(gate);try{if(!engine)return 0;engine->activate();if(pause){if(engine->asio)BASS_ASIO_Stop();else BASS_WASAPI_Stop(FALSE);engine->playing=false;}else engine->resume();return 1;}catch(const std::exception&e){errorText=e.what();return 0;}}
 // 真 seek：保留已取得的输出设备（含独占句柄），只重建解码器。
 // 暂停状态下也能定位，播放状态保持不变。
 API int luma_seek(double position){std::lock_guard lock(gate);try{if(!engine)return 0;bool wasPlaying=engine->playing;if(wasPlaying){if(engine->asio)BASS_ASIO_Stop();else BASS_WASAPI_Stop(FALSE);}engine->seek(position);if(wasPlaying)engine->resume();errorText.clear();return 1;}catch(const std::exception&e){errorText=e.what();return 0;}}
 API void luma_stop(){std::lock_guard lock(gate);engine.reset();}
 API void luma_volume(float v){std::lock_guard lock(gate);if(engine)engine->volume=std::clamp(v,0.f,1.f);}
-API const char* luma_state(){std::lock_guard lock(gate);if(!engine){resultText="{}";return resultText.c_str();}auto&e=*engine;bool done=(e.ended&&e.head==e.tail)||e.atLimit();std::ostringstream o;o<<"{\"playing\":"<<(e.playing?"true":"false")<<",\"ended\":"<<(done?"true":"false")<<",\"failed\":"<<(e.failed?"true":"false")<<",\"error\":"<<quote(e.failure)<<",\"position\":"<<e.position()<<",\"duration\":"<<e.span()<<",\"sourceRate\":"<<e.sourceRate<<",\"sourceChannels\":"<<e.sourceChannels<<",\"rate\":"<<e.rate<<",\"channels\":"<<e.channels<<",\"bits\":"<<e.bits<<",\"dsd\":"<<(e.dsd?"true":"false")<<",\"mode\":"<<e.dsdMode<<",\"backend\":"<<e.backend<<",\"underruns\":"<<e.underruns<<",\"deviceGone\":"<<(e.deviceGone?"true":"false")<<"}";resultText=o.str();return resultText.c_str();}
+API const char* luma_state(){std::lock_guard lock(gate);if(!engine){resultText="{}";return resultText.c_str();}auto&e=*engine;bool done=(e.ended&&e.head==e.tail)||e.atLimit();std::ostringstream o;o<<"{\"playing\":"<<(e.playing?"true":"false")<<",\"ended\":"<<(done?"true":"false")<<",\"failed\":"<<(e.failed?"true":"false")<<",\"error\":"<<quote(e.failure)<<",\"position\":"<<e.position()<<",\"duration\":"<<e.span()<<",\"sourceRate\":"<<e.sourceRate<<",\"sourceChannels\":"<<e.sourceChannels<<",\"rate\":"<<e.rate<<",\"channels\":"<<e.channels<<",\"bits\":"<<e.bits<<",\"dsd\":"<<(e.dsd?"true":"false")<<",\"mode\":"<<e.dsdMode<<",\"backend\":"<<e.backend<<",\"underruns\":"<<e.underruns<<",\"gain\":"<<e.gainLinear<<",\"deviceGone\":"<<(e.deviceGone?"true":"false")<<"}";resultText=o.str();return resultText.c_str();}
 API void luma_shutdown(){std::lock_guard lock(gate);engine.reset();for(auto p:plugins)BASS_PluginFree(p);plugins.clear();BASS_Free();initialized=false;}

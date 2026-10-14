@@ -23,6 +23,7 @@ Windows 无损音乐播放器：WinUI 3 前端 + C++/BASS 原生音频引擎，�
 - **格式**：FLAC / APE / ALAC / Opus / WavPack / WAV，以及 **DSF / DFF / SACD ISO**（内置 DSD 解码工作进程，支持 DST 解码）；**单文件整轨 + 同名 .cue 自动拆成多首**（兼容 GBK 中文 cue）
 - **DSD 回放**：DSD 转 PCM、DoP 透传、ASIO 原生 DSD（Native DSD）
 - **输出后端**：WASAPI 共享 / WASAPI 独占 / ASIO，采样率可跟随音源或强制指定；系统没有 ASIO 驱动时可在设置里**一键安装随应用附带的 FlexASIO 通用驱动**（自动配置为 WASAPI 独占），开箱即得 ASIO 独占输出
+- **ReplayGain**：按设备可选关闭 / 专辑增益 / 歌曲增益，增益折进软件音量（**不重采样**），DSD 透传与原生 DSD 路径不受影响
 - **按设备记忆配置**：每台输出设备独立保存输出方式、DSD 模式、通道映射等档案
 - **ASIO 通道映射**：多声道输出可自定义 ASIO 通道顺序
 - **歌词与封面**：联网搜索歌词/专辑封面、本地 LRC 导入、逐行动画歌词
@@ -80,3 +81,4 @@ native/  C++ 音频引擎
 - 本项目采用 [MIT 许可证](LICENSE) 开源：可自由使用、修改、分发，商用亦可，只需保留版权声明与许可证原文。BASS 库版权归 [un4seen](https://www.un4seen.com/) 所有，由构建脚本从官方下载，本仓库不包含其任何文件。第三方组件详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 - ASIO 输出开箱即用：系统没有任何 ASIO 驱动时，在「播放设置」选择 ASIO 输出方式，点击"一键安装 FlexASIO 通用驱动"（需一次管理员确认），安装后自动以 WASAPI 独占方式输出。若 DAC 有厂商 ASIO 驱动（支持原生 DSD），优先使用厂商驱动。
 - DoP 透传需要 24 位输出路径：本应用在 FlexASIO 上会自动强制 24 位容器；ASIO4ALL 若与设备协商成 16 位会截断 DoP 产生噪声，此类情况请改用厂商 ASIO 或 FlexASIO。
+- ReplayGain **只读取文件里已有的 `REPLAYGAIN_*` 标签**，不自行分析音频——请先用 foobar2000 / MP3Gain 等工具写好标签，否则不受影响。没有标签的曲目会保持原样（不会静音）。增益折进软件音量，不重采样、不改变 DSD 字节流；DSD 透传与原生 DSD 路径不走软件音量，因此这两类输出下 ReplayGain 不生效。

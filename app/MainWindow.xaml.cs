@@ -370,6 +370,17 @@ public sealed partial class MainWindow : Window
     // cue 拆出的曲目 position 是整轨内绝对秒，limit 是本曲终点。首曲起点为 0，靠 FromCue 而不是 CueIndex 判断要不要截断。
     static double CueStart(Track track)=>Math.Max(0,track.CueIndex);
     static double CueLimit(Track track)=>track.FromCue?Math.Max(track.CueIndex,track.CueIndex+track.Duration):0;
+    // ReplayGain 折进软件音量：dB → 线性倍率。模式在播放时才生效，
+    // 所以切换设置后立刻改变，不需要重新导入曲库。
+    // DSD 透传/原生路径不适用（引擎里不乘这些样本），位完美用户自行关闭即可。
+    static float GainFor(Track track,DeviceProfile profile)
+    {
+        if(profile.ReplayGain==0)return 1f;
+        double db=profile.ReplayGain==1?track.ReplayGainAlbumDb:track.ReplayGainDb;
+        // 选中的那一项缺失时不做修正（增益 1.0），不能因为"没标签"就静音。
+        if(db==0)return 1f;
+        return (float)Math.Pow(10,db/20);
+    }
     async Task Play(Track track,double position=0)
     {
         if(audio==null){Toast("音频引擎不可用",error:true);return;}if(Device==null){await Settings();return;}
@@ -381,7 +392,7 @@ public sealed partial class MainWindow : Window
             if(generation!=playGeneration)return;SetBusy(true);Notice.IsOpen=false;endSeen=DateTime.MinValue;
             // 历史档案可能给 WASAPI 设备存过 ASIO 后端，播放前按设备实际类型纠正。
             var profile=prefs.Profile;if(Device.Backend!=2&&profile.Backend==2)profile.Backend=Device.Backend;
-            await audio.Open(track,Device,profile,prefs.Volume,start,limit);
+            await audio.Open(track,Device,profile,prefs.Volume,start,limit,GainFor(track,profile));
             if(FlexAsioConfig.LastWarning.Length>0)Toast("ASIO 提示",FlexAsioConfig.LastWarning);
             current=track;lastState=audio.State();prefs.LastTrack=track.Id;
             if(!queue.Any(t=>t.Id==track.Id))queue.Add(track);
@@ -533,6 +544,8 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
         var dop=new CheckBox{Content="我已确认此 DAC 支持 DoP",IsChecked=prefs.Profile.DopConfirmed};
         int[] rates=[0,44100,48000,88200,96000,176400,192000,352800,384000];var rate=new ComboBox{Header="PCM 输出采样率",ItemsSource=rates.Select(r=>r==0?"跟随音源":$"{r/1000d:0.#} kHz").ToList(),SelectedIndex=Math.Max(0,Array.IndexOf(rates,prefs.Profile.ForceRate)),HorizontalAlignment=HorizontalAlignment.Stretch};
         var downmix=new CheckBox{Content="将多声道 PCM 混成立体声",IsChecked=prefs.Profile.Downmix};
+        // ReplayGain 只读取文件里已有的标签（不自行分析），所以没打标签的文件不受影响。
+        var replayGain=new ComboBox{Header="ReplayGain 音量修正（读取文件标签）",ItemsSource=new[]{"关闭","使用专辑增益","使用歌曲增益"},SelectedIndex=Math.Clamp(prefs.Profile.ReplayGain,0,2),HorizontalAlignment=HorizontalAlignment.Stretch};
         var mapping=new TextBox{Header="ASIO 通道映射（从 1 开始，按 FL FR C LFE SL SR BL BR 顺序）",Text=string.Join(", ",prefs.Profile.Mapping.Select(i=>i+1))};
         var onlineCheck=new ToggleSwitch{Header="联网查找缺失封面与歌词",IsOn=prefs.Online,OnContent="开启",OffContent="仅本地"};
         var themeBox=new ComboBox{Header="主题",ItemsSource=new[]{"跟随系统","深色","浅色"},SelectedIndex=Math.Clamp(prefs.Theme,0,2),HorizontalAlignment=HorizontalAlignment.Stretch};
@@ -569,7 +582,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
             // 输出方式跟随设备类型：WASAPI 设备只有共享/独占，ASIO 驱动只有 ASIO，两者不可交叉。
             modeBox.ItemsSource=d.Backend==2?new object[]{"ASIO"}:new object[]{"WASAPI 共享","WASAPI 独占"};
             modeBox.SelectedIndex=d.Backend==2?0:Math.Clamp(p.Backend,0,1);
-            dsdBox.SelectedIndex=p.DsdMode;dop.IsChecked=p.DopConfirmed;downmix.IsChecked=p.Downmix;rate.SelectedIndex=Math.Max(0,Array.IndexOf(rates,p.ForceRate));mapping.Text=string.Join(", ",p.Mapping.Select(i=>i+1));asioTarget.Visibility=d.Name==AsioSetup.DriverName?Visibility.Visible:Visibility.Collapsed;asioTarget.SelectedValue=p.AsioTargetId;
+            dsdBox.SelectedIndex=p.DsdMode;dop.IsChecked=p.DopConfirmed;downmix.IsChecked=p.Downmix;replayGain.SelectedIndex=Math.Clamp(p.ReplayGain,0,2);rate.SelectedIndex=Math.Max(0,Array.IndexOf(rates,p.ForceRate));mapping.Text=string.Join(", ",p.Mapping.Select(i=>i+1));asioTarget.Visibility=d.Name==AsioSetup.DriverName?Visibility.Visible:Visibility.Collapsed;asioTarget.SelectedValue=p.AsioTargetId;
         }
         deviceBox.SelectionChanged+=(_,_)=>{if(deviceBox.SelectedItem is AudioDevice d)LoadProfile(d);};
         // 是否提供 FlexASIO 一键安装只看系统里有没有 ASIO 驱动，与输出方式无关。
@@ -590,7 +603,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
         var panel=new StackPanel{Spacing=16,Width=470};
         void Section(string title,params UIElement[] elements){panel.Children.Add(new TextBlock{Text=title,FontSize=20,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,Margin=new Thickness(0,12,0,0)});foreach(var el in elements)panel.Children.Add(el);}
         Section("外观",themeBox,auroraCheck,qualityBox,motion,transparency);
-        Section("播放输出",deviceBox,modeBox,asioHint,asioInstall,asioTarget,dsdBox,dop,rate,downmix,mapping,hint);
+        Section("播放输出",deviceBox,modeBox,asioHint,asioInstall,asioTarget,dsdBox,dop,rate,downmix,replayGain,mapping,hint);
         Section("通用",onlineCheck,closeBehavior,hotkeyHint,clickBehavior,scan,about);
         var dialog=Dialog("设置",new ScrollViewer{Content=panel,MaxHeight=530},"保存设置");
         void SaveAppearancePreferences(){
@@ -610,7 +623,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
             try{var map=mapping.Text.Split(',',StringSplitOptions.TrimEntries).Select(int.Parse).Select(i=>i-1).ToArray();if(map.Length!=8||map.Any(i=>i<0)||map.Distinct().Count()!=8)throw new FormatException();
                 string atId="",atName="";
                 if(d.Name==AsioSetup.DriverName&&asioTarget.SelectedItem is AudioDevice t&&t.Index>=0){atId=t.Id;atName=t.Name;}
-                prefs.DeviceId=d.Id;prefs.DeviceBackend=d.Backend;prefs.Profiles[$"{d.Backend}:{d.Id}"]=new(){Backend=backend,DsdMode=dsdBox.SelectedIndex,DopConfirmed=dop.IsChecked==true,ForceRate=rates[rate.SelectedIndex],Downmix=downmix.IsChecked==true,Mapping=map,AsioTargetId=atId,AsioTargetName=atName};
+                prefs.DeviceId=d.Id;prefs.DeviceBackend=d.Backend;prefs.Profiles[$"{d.Backend}:{d.Id}"]=new(){Backend=backend,DsdMode=dsdBox.SelectedIndex,DopConfirmed=dop.IsChecked==true,ForceRate=rates[rate.SelectedIndex],Downmix=downmix.IsChecked==true,ReplayGain=Math.Clamp(replayGain.SelectedIndex,0,2),Mapping=map,AsioTargetId=atId,AsioTargetName=atName};
                 SaveAppearancePreferences();
                 RefreshAppearance();
                 AppPaths.Save(prefs);

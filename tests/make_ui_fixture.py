@@ -1,5 +1,5 @@
 """Create an isolated, offline UI library with generated art and digital silence."""
-import argparse, json, pathlib, sqlite3, wave
+import argparse, json, pathlib, sqlite3, struct, wave
 from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -87,6 +87,42 @@ def create_cue_album(assets: pathlib.Path):
         '    INDEX 01 00:15:00',
         ''])
     cue.write_bytes(text.encode('gbk'))
+    create_replaygain_sample(assets)
+
+def riff_chunk(fourcc: bytes, body: bytes) -> bytes:
+    """RIFF 子块：4 字节 ID + 4 字节长度（不含补位）+ 数据 + 奇数字节补 0。"""
+    return fourcc + struct.pack('<I', len(body)) + body + (b'\x00' if len(body) % 2 else b'')
+
+def id3v2_frame(frame_id: bytes, payload: bytes) -> bytes:
+    """单个 ID3v2.3 帧：帧 ID + syncsafe 长度 + 标志 + 载荷。"""
+    size = len(payload)
+    sync = bytes([(size >> 21) & 0x7f, (size >> 14) & 0x7f, (size >> 7) & 0x7f, size & 0x7f])
+    return frame_id + sync + b'\x00\x00' + payload
+
+def id3v2_txxx(description: str, value: str) -> bytes:
+    """TXXX 私有帧：UTF-8 编码标记 + 描述符 + \\x00 + 值。TagLib 的 ReplayGain 读的就是它。"""
+    return id3v2_frame(b'TXXX', b'\x03' + description.encode('utf-8') + b'\x00' + value.encode('utf-8'))
+
+def id3v2_text(frame_id: bytes, text: str) -> bytes:
+    return id3v2_frame(frame_id, b'\x03' + text.encode('utf-8'))
+
+def id3v2_tag(frames: bytes) -> bytes:
+    size = len(frames)
+    sync = bytes([(size >> 21) & 0x7f, (size >> 14) & 0x7f, (size >> 7) & 0x7f, size & 0x7f])
+    return b'ID3' + b'\x03\x00' + b'\x00' + sync + frames
+
+def create_replaygain_sample(assets: pathlib.Path):
+    """一张带 ReplayGain 标签的 WAV（内嵌 ID3v2）：标签读取走真实解析，不硬编码数值。"""
+    path = assets / 'replaygain-sample.wav'
+    fmt = struct.pack('<HHIIHH', 1, 2, 48000, 48000 * 4, 4, 16)
+    gain_db = -6.5
+    tag = id3v2_tag(
+        id3v2_text(b'TIT2', 'ReplayGain 样本') +
+        id3v2_txxx('REPLAYGAIN_TRACK_GAIN', f'{gain_db:.2f} dB'))
+    chunks = riff_chunk(b'fmt ', fmt) + riff_chunk(b'data', bytes(48000 * 4 * 2)) + riff_chunk(b'id3 ', tag)
+    data = b'WAVE' + chunks
+    path.write_bytes(b'RIFF' + struct.pack('<I', len(data)) + data)
+    (assets / 'replaygain-expected.json').write_text(json.dumps({'trackGain': gain_db}), encoding='utf-8')
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--profile',default='build/ui-test-profile')

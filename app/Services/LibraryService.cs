@@ -99,7 +99,19 @@ public class LibraryService
                 if(t.SampleRate==0)t.SampleRate=tag.Properties.AudioSampleRate;
                 if(t.Bits==0)t.Bits=tag.Properties.BitsPerSample;
                 if(tag.Properties.AudioChannels>0)t.Channels=tag.Properties.AudioChannels;
-            }t.Cover=cover;}
+            }
+            t.Cover=cover;}
+            // ReplayGain 只从标签读（不做音频分析）。曲目与专辑增益分开存，
+            // 具体用哪个由播放时的设置决定；cue 拆出的曲目回退到专辑增益。
+            var gains=ReplayGainTag.Read(tag.Tag);
+            if(gains.TrackGainDb!=0||gains.AlbumGainDb!=0)
+                foreach(var t in tracks){
+                    var trackGain=t.FromCue?0:gains.TrackGainDb;
+                    t.ReplayGainDb=trackGain!=0?trackGain:gains.AlbumGainDb;
+                    t.ReplayGainAlbumDb=gains.AlbumGainDb;
+                    t.GainSource=trackGain!=0?"track":gains.AlbumGainDb!=0?"album":"";
+                    t.ReplayGainPeak=Math.Max(gains.TrackPeak,gains.AlbumPeak);
+                }
         }catch(Exception e){if(format is not ("DSF" or "DFF" or "ISO"))AppPaths.Log($"Tags: {e.Message}");}
         foreach(var t in tracks){if(string.IsNullOrEmpty(t.Cover)){var dir=System.IO.Path.GetDirectoryName(file)!;t.Cover=new[]{"cover.jpg","folder.jpg","cover.png","folder.png"}.Select(x=>System.IO.Path.Combine(dir,x)).FirstOrDefault(File.Exists)??"";}}
         return tracks;

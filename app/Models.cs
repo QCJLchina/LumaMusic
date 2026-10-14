@@ -27,6 +27,14 @@ public class Track : INotifyPropertyChanged
     public double CueIndex {get;set;}
     // 同名 cue 拆出的曲目。旧库缺省 false，重新扫描后才会带上播放上限。
     public bool FromCue {get;set;}
+    // ReplayGain 音量修正（dB，正值表示要调响）。只从文件标签读，不自行分析。
+    // 曲目增益与专辑增益分开存：模式（关闭/专辑/歌曲）是播放时的选择，不能在导入时定死。
+    public double ReplayGainDb {get;set;}
+    public double ReplayGainAlbumDb {get;set;}
+    // 增益来源标签的原始来源，仅用于显示："track"/"album"/""。
+    public string GainSource {get;set;}="";
+    // 真峰值（dBFS）。标签里有 REPLAYGAIN_*_PEAK 时才有，用于提示增益后可能削顶。
+    public double ReplayGainPeak {get;set;}
     string cover=""; public string Cover {get=>cover;set{cover=value;OnChanged();}}
     // x:Bind 函数直接返回 ImageSource，绕开 XamlBindingHelper.ConvertValue——
     // 它对空字符串（甚至 null）都会抛 ArgumentException，且未处理异常会让整个应用崩溃。
@@ -52,7 +60,7 @@ public class PlaybackState
     public string Error {get;set;}=""; public double Position {get;set;} public double Duration {get;set;}
     public int SourceRate {get;set;} public int SourceChannels {get;set;} public int Rate {get;set;} public int Channels {get;set;}
     public int Bits {get;set;} public bool Dsd {get;set;} public int Mode {get;set;} public int Backend {get;set;} public long Underruns {get;set;}
-    public bool DeviceGone {get;set;}
+    public bool DeviceGone {get;set;} public float Gain {get;set;}=1;
     public string SourceLabel=>Dsd?$"DSD{SourceRate/44100}":$"PCM {SourceRate/1000d:0.#} kHz";
     public string OutputLabel=>Dsd&&Mode==2?$"Native DSD · {Rate/1000000d:0.###} MHz":Dsd&&Mode==1?$"DoP · {Rate/1000d:0.#} kHz":$"PCM · {Rate/1000d:0.#} kHz";
     public string BackendLabel=>Backend==2?"ASIO":Backend==1?"WASAPI 独占":"WASAPI 共享";
@@ -63,6 +71,8 @@ public class DeviceProfile
     public int Backend {get;set;}=1;public int DsdMode {get;set;}=3;public bool DopConfirmed {get;set;}
     public int PcmRate {get;set;}=176400;public int ForceRate {get;set;} public bool Downmix {get;set;}
     public int[] Mapping {get;set;}=[0,1,2,3,4,5,6,7];
+    // ReplayGain：0 关闭 / 1 专辑增益 / 2 歌曲增益。增益折进软件音量，不重采样。
+    public int ReplayGain {get;set;}
     // FlexASIO 定向目标（端点 ID 为身份，名字给 FlexASIO 匹配用）；空 = Windows 默认输出
     public string AsioTargetId {get;set;}="";public string AsioTargetName {get;set;}="";
 }
