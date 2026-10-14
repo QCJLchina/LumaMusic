@@ -54,6 +54,7 @@ public sealed partial class MainWindow : Window
     DateTime endSeen=DateTime.MinValue,lastSave=DateTime.MinValue;string rawLyrics="";
     AudioDevice? Device=>devices.FirstOrDefault(d=>d.Id==prefs.DeviceId&&d.Backend==prefs.DeviceBackend);
     TrayIcon? tray;
+    GlobalHotKeys? hotKeys;
 
     public MainWindow()
     {
@@ -72,7 +73,7 @@ public sealed partial class MainWindow : Window
         SeekSlider.AddHandler(UIElement.PointerReleasedEvent,new PointerEventHandler(async(_,_)=>{if(seeking){seeking=false;seekTimer.Stop();await SeekTo(SeekSlider.Value);}}),true);
         SeekSlider.AddHandler(UIElement.PointerCanceledEvent,new PointerEventHandler((_,_)=>{seeking=false;seekTimer.Stop();}),true);
         noticeTimer.Tick+=NoticeTimer_Tick;
-        Closed+=async(_,_)=>{closing=true;noticeTimer.Stop();DisposeAppearance();timer.Stop();seekTimer.Stop();searchTimer.Stop();mediaCancellation.Cancel();scanCancellation?.Cancel();prefs.LastTrack=current?.Id??"";prefs.LastPosition=lastState.Position;prefs.Queue=queue.Select(t=>t.Id).ToList();AppPaths.Save(prefs);if(audio!=null){await audio.Stop();audio.Dispose();}tray?.Dispose();};
+        Closed+=async(_,_)=>{closing=true;noticeTimer.Stop();DisposeAppearance();timer.Stop();seekTimer.Stop();searchTimer.Stop();mediaCancellation.Cancel();scanCancellation?.Cancel();prefs.LastTrack=current?.Id??"";prefs.LastPosition=lastState.Position;prefs.Queue=queue.Select(t=>t.Id).ToList();AppPaths.Save(prefs);if(audio!=null){await audio.Stop();audio.Dispose();}tray?.Dispose();hotKeys?.Dispose();};
         AppWindow.Closing+=(_,args)=>{if(prefs.CloseToTray&&!reallyClosing){args.Cancel=true;HideToTray();}};
     }
     void HideToTray()
@@ -178,10 +179,35 @@ public sealed partial class MainWindow : Window
         catch(Exception ex){Toast("音频引擎无法启动",ex.Message,true);}
         tracks=await Task.Run(library.Load);foreach(var id in prefs.Queue){var t=tracks.FirstOrDefault(t=>t.Id==id);if(t!=null)queue.Add(t);}
         VolumeSlider.Value=prefs.Volume*100;RefreshAppearance();
-        ready=true;Filter();RefreshPlaylists();SetModeIcons();timer.Start();
+        ready=true;Filter();UpdateSortHeader();RefreshPlaylists();SetModeIcons();timer.Start();
         if(tracks.FirstOrDefault(t=>t.Id==prefs.LastTrack) is {} last){current=last;await ShowTrack(last);}
         var arguments=Environment.GetCommandLineArgs().Skip(1).Where(File.Exists).ToList();if(arguments.Count>0)await Import(arguments);
         if(Environment.GetEnvironmentVariable("LUMA_DATA_DIR")==null)_=AutoCheckUpdate();
+        RegisterHotKeys();
+    }
+    // 热键消息在自己的 HWND_MESSAGE 窗口上收到，必须回 UI 线程再动控件。
+    void RegisterHotKeys()
+    {
+        try{
+            hotKeys=new GlobalHotKeys();
+            hotKeys.Triggered+=action=>DispatcherQueue.TryEnqueue(()=>HotKeyAction(action));
+        }catch(Exception ex){AppPaths.Log("GlobalHotKeys: "+ex.Message);Toast("全局热键不可用","窗口失焦时无法用快捷键控制播放。",true);}
+    }
+    async void HotKeyAction(GlobalHotKeys.Action action)
+    {
+        if(closing)return;
+        switch(action){
+            case GlobalHotKeys.Action.PlayPause:PlayPause_Click(this,new());break;
+            case GlobalHotKeys.Action.Previous:Previous_Click(this,new());break;
+            case GlobalHotKeys.Action.Next:Next_Click(this,new());break;
+            // 隐藏到托盘时按 L 直接把窗口叫回正在播放页。
+            case GlobalHotKeys.Action.ShowNowPlaying:
+                if(tray!=null){AppWindow.Show();SetVisualActivity(true);}
+                if(!nowVisible)Now_Click(this,new());
+                Activate();
+                break;
+        }
+        await Task.CompletedTask;
     }
     int noticeGeneration; DateTime noticeDeadline; bool noticeHeld; bool noticeProgress; Storyboard? noticeFade;
     void Toast(string title,string message="",bool error=false){if(closing)return;noticeFade?.Stop();noticeProgress=false;noticeHeld=false;noticeGeneration++;Notice.Opacity=1;Notice.Title=title;Notice.Message=message;Notice.Severity=error?InfoBarSeverity.Warning:InfoBarSeverity.Informational;Notice.IsOpen=true;noticeDeadline=DateTime.UtcNow.AddSeconds(error?8:3);noticeTimer.Start();}
@@ -202,12 +228,19 @@ public sealed partial class MainWindow : Window
         if(artistFilter!=null)source=source.Where(t=>t.Artist==artistFilter);
         if(playlistFilter is long id){var ids=library.PlaylistTracks(id);source=source.Where(t=>ids.Contains(t.Id));}
         var search=SearchBox.Text.Trim();if(search.Length>0)source=source.Where(t=>($"{t.Title} {t.Artist} {t.Album}").Contains(search,StringComparison.CurrentCultureIgnoreCase));
+        // 播放列表按用户排过的顺序走，其余视图套用当前排序列。
+        if(playlistFilter==null)source=Sort(source);
         visible.Clear();foreach(var t in source)visible.Add(t);
         TrackCount.Text=$"{visible.Count:N0} 首歌曲";LibraryCount.Text=$"{tracks.Select(t=>t.AlbumKey).Distinct().Count():N0} 张专辑 · {tracks.Count:N0} 首歌曲";
         EmptyState.Visibility=visible.Count==0?Visibility.Visible:Visibility.Collapsed;
         EmptyTitle.Text=tracks.Count==0?"你的音乐，值得一个好位置。":"暂时没有匹配的歌曲";
         TrackList.Visibility=!showAlbums&&!showArtists?Visibility.Visible:Visibility.Collapsed;
         MultiSelectButton.Visibility=TrackList.Visibility;
+        // 列头只在歌曲视图有意义；专辑/艺术家视图自己已经按组排好序。
+        if(TrackList.Header is FrameworkElement header)header.Visibility=showAlbums||showArtists?Visibility.Collapsed:Visibility.Visible;
+        // 拖拽重排只对播放列表开放：其他视图的顺序来自曲库排序，拖了反而对不上。
+        bool reorderable=playlistFilter!=null&&!multiSelecting&&!showAlbums&&!showArtists;
+        TrackList.CanDragItems=reorderable;TrackList.CanReorderItems=reorderable;
         AlbumGrid.Visibility=showAlbums?Visibility.Visible:Visibility.Collapsed;
         ArtistList.Visibility=showArtists?Visibility.Visible:Visibility.Collapsed;
         ArtistList.ItemsSource=visible.GroupBy(t=>t.Artist).OrderBy(g=>g.Key).Select(g=>new ArtistSummary(g.Key,g.Select(t=>t.AlbumKey).Distinct().Count(),g.Count())).ToList();
@@ -215,6 +248,42 @@ public sealed partial class MainWindow : Window
         BrowseBack.Visibility=albumFilter!=null||artistFilter!=null?Visibility.Visible:Visibility.Collapsed;
         UpdateBrowseSelection(); UpdateNavigation();
         AlbumGrid.ItemsSource=visible.GroupBy(t=>t.AlbumKey).Select(g=>g.First()).ToList();
+    }
+    // 列表排序列。"title" 用 Load() 已有的专辑→碟→曲顺序（只切方向，不重排），
+    // 其余按对应键排，同键时退回入库序号，保证并列项顺序稳定不跳。
+    string sortKey="title";bool sortDescending;
+    IEnumerable<Track> Sort(IEnumerable<Track> source)
+    {
+        var list=source.ToList();
+        if(sortKey==""||sortKey=="title")return sortDescending?list.AsEnumerable().Reverse():list;
+        Func<Track,object?> key=sortKey switch
+        {
+            "quality"=>t=>t.Quality,
+            "duration"=>t=>t.Duration,
+            "year"=>t=>t.Year,
+            _=>t=>t.Title,
+        };
+        var stable=list.Select((t,i)=>(t,i)).OrderBy(x=>sortDescending?-x.i:x.i).Select(x=>x.t);
+        // 不同键类型混排要统一比较器：字符串走文化比较，数值走数值比较。
+        var ordered=sortKey=="quality"
+            ?stable.OrderBy(t=>t.Quality,StringComparer.CurrentCultureIgnoreCase)
+            :stable.OrderBy(t=>Convert.ToDouble(key(t)??0));
+        return sortDescending?ordered.Reverse():ordered;
+    }
+    void Sort_Click(object sender,RoutedEventArgs e)
+    {
+        if(sender is not Button{Tag:string key} button)return;
+        // 再点同一列 = 反向；点别的列 = 用该列升序。
+        if(sortKey==key)sortDescending=!sortDescending;
+        else{sortKey=key;sortDescending=false;}
+        Filter();UpdateSortHeader();
+    }
+    static readonly Dictionary<string,string> SortLabels=new(){{"title","标题"},{"quality","格式"},{"duration","时长"}};
+    void UpdateSortHeader()
+    {
+        foreach(var b in new[]{SortTitle,SortQuality,SortDuration})
+            if(b.Tag is string key&&SortLabels.TryGetValue(key,out var label))
+                b.Content=label+(sortKey==key?(sortDescending?" ↓":" ↑"):"");
     }
     void Animate(UIElement element){if(ReduceMotion)return;var v=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element);var c=v.Compositor;var fade=c.CreateScalarKeyFrameAnimation();fade.InsertKeyFrame(0,0);fade.InsertKeyFrame(1,1);fade.Duration=TimeSpan.FromMilliseconds(300);v.StartAnimation("Opacity",fade);var slide=c.CreateVector3KeyFrameAnimation();slide.InsertKeyFrame(0,new(0,12,0));slide.InsertKeyFrame(1,Vector3.Zero);slide.Duration=TimeSpan.FromMilliseconds(280);Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetIsTranslationEnabled(element,true);v.StartAnimation("Translation",slide);}
     void Fade(UIElement element,bool show){var v=Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(element);float to=show?1:0;if(ReduceMotion){v.StopAnimation("Opacity");v.Opacity=to;return;}var c=v.Compositor;var anim=c.CreateScalarKeyFrameAnimation();anim.InsertKeyFrame(1,to);anim.Duration=TimeSpan.FromMilliseconds(280);v.StartAnimation("Opacity",anim);}
@@ -234,15 +303,54 @@ public sealed partial class MainWindow : Window
     void BrowseBack_Click(object sender,RoutedEventArgs e){bool artist=artistFilter!=null;ClearBrowseDetail();showArtists=artist;showAlbums=!artist;Filter();}
     ContentDialog Dialog(string title,object content,string primary="确定")=>new(){Title=title,Content=content,PrimaryButtonText=primary,CloseButtonText="取消",DefaultButton=ContentDialogButton.Primary,XamlRoot=Root.XamlRoot,RequestedTheme=Root.ActualTheme};
     void RefreshPlaylists(){PlaylistNav.Children.Clear();foreach(var p in library.Playlists()){var b=new Button{Content="♫  "+p.Name,Style=(Style)Application.Current.Resources["NavButton"],Tag=p};
-        // 右键删除：确认后连歌单关系一并清除，歌曲文件不受影响；删的是当前筛选中的列表则回到音乐库
-        var menu=new MenuFlyout();var del=new MenuFlyoutItem{Text="删除播放列表"};del.Click+=async(_,_)=>{
+        // 右键菜单：改名 / 清空 / 导出 / 删除。删除只清歌单关系，歌曲文件不受影响。
+        var menu=new MenuFlyout();
+        var rename=new MenuFlyoutItem{Text="重命名播放列表"};rename.Click+=async(_,_)=>await RenamePlaylist(p);
+        var clear=new MenuFlyoutItem{Text="清空播放列表"};clear.Click+=async(_,_)=>{
+            if(library.PlaylistTracks(p.Id).Count==0){Toast("播放列表已经是空的",p.Name);return;}
+            var confirm=new TextBlock{Text="将移除「"+p.Name+"」中的全部歌曲，磁盘文件不受影响。",TextWrapping=TextWrapping.Wrap};
+            if(await Show(Dialog("清空播放列表",confirm,"清空"))==ContentDialogResult.Primary){library.ClearPlaylist(p.Id);if(playlistFilter==p.Id)Filter();Toast("播放列表已清空",p.Name);}
+        };
+        var export=new MenuFlyoutItem{Text="导出为 m3u 播放列表"};export.Click+=async(_,_)=>await ExportPlaylist(p);
+        var del=new MenuFlyoutItem{Text="删除播放列表"};del.Click+=async(_,_)=>{
             var confirm=new TextBlock{Text="「"+p.Name+"」将被删除，其中的歌曲文件不受影响。",TextWrapping=TextWrapping.Wrap};
             if(await Show(Dialog("删除播放列表",confirm,"删除"))==ContentDialogResult.Primary){library.DeletePlaylist(p.Id);if(playlistFilter==p.Id){playlistFilter=null;PageTitle.Text="音乐库";ShowLibrary();}Filter();RefreshPlaylists();Toast("播放列表已删除",p.Name);}
-        };menu.Items.Add(del);b.ContextFlyout=menu;
+        };
+        menu.Items.Add(rename);menu.Items.Add(clear);menu.Items.Add(export);menu.Items.Add(new MenuFlyoutSeparator());menu.Items.Add(del);b.ContextFlyout=menu;
         b.Click+=(_,_)=>{playlistFilter=p.Id;favoritesOnly=false;albumFilter=null;artistFilter=null;PageTitle.Text=p.Name;showAlbums=false;showArtists=false;ShowLibrary();Filter();};PlaylistNav.Children.Add(b);ConfigurePlaylistButton(b,p);}}
     async void NewPlaylist_Click(object sender,RoutedEventArgs e){var text=new TextBox{PlaceholderText="为这份心情取个名字",MaxLength=60};if(await Show(Dialog("新建播放列表",text,"创建"))==ContentDialogResult.Primary&&!string.IsNullOrWhiteSpace(text.Text)){library.CreatePlaylist(text.Text.Trim());RefreshPlaylists();}}
+    async Task RenamePlaylist(Playlist playlist)
+    {
+        var text=new TextBox{Text=playlist.Name,MaxLength=60};
+        if(await Show(Dialog("重命名播放列表",text,"保存"))!=ContentDialogResult.Primary||string.IsNullOrWhiteSpace(text.Text))return;
+        var name=text.Text.Trim();if(name==playlist.Name)return;
+        library.RenamePlaylist(playlist.Id,name);
+        // 正在看这个列表时标题要跟着换，否则删/改名后页面标题与侧栏不一致。
+        if(playlistFilter==playlist.Id)PageTitle.Text=name;
+        RefreshPlaylists();Toast("播放列表已重命名",name);
+    }
+    async Task ExportPlaylist(Playlist? playlist)
+    {
+        // 队列面板同样走这个入口：传 null 表示导出当前播放队列。
+        List<Track> items;
+        if(playlist!=null){
+            var ids=library.PlaylistTracks(playlist.Id);
+            if(ids.Count==0){Toast("播放列表是空的",playlist.Name);return;}
+            var lookup=tracks.ToDictionary(t=>t.Id,t=>t);
+            items=ids.Where(lookup.ContainsKey).Select(id=>lookup[id]).ToList();
+        }else items=queue.ToList();
+        if(items.Count==0){Toast("没有可导出的歌曲");return;}
+        // Windows App SDK 没有投影 FileSavePicker，FileSavePickerShim 直接走原生 COM。
+        var file=await FileSavePickerShim.PickAsync(WinRT.Interop.WindowNative.GetWindowHandle(this),(playlist?.Name??"播放队列")+".m3u","m3u 播放列表",".m3u");
+        if(file==null)return;
+        try{
+            var written=LibraryService.ExportM3u(file.Path,items);
+            if(written==null)Toast("没有可导出的歌曲","所选歌曲的文件可能已被移动。",true);
+            else Toast("已导出播放列表",$"{items.Count} 首 → {System.IO.Path.GetFileName(written)}");
+        }catch(Exception ex){Toast("导出失败",ex.Message,true);}
+    }
     async void ImportFolder_Click(object sender,RoutedEventArgs e){var picker=new FolderPicker();WinRT.Interop.InitializeWithWindow.Initialize(picker,WinRT.Interop.WindowNative.GetWindowHandle(this));picker.FileTypeFilter.Add("*");var folder=await picker.PickSingleFolderAsync();if(folder!=null){if(!prefs.Roots.Contains(folder.Path))prefs.Roots.Add(folder.Path);AppPaths.Save(prefs);await Import([folder.Path]);}}
-    async Task Import(IEnumerable<string> paths){if(scanCancellation!=null){Toast("正在扫描音乐，请稍候");return;}scanCancellation=new();SetBusy(true);try{var count=await library.Import(paths,new Progress<string>(s=>SetProgressNotice("正在整理音乐库",s)),scanCancellation.Token);tracks=await Task.Run(library.Load);Filter();Toast("音乐库已更新",$"新增或更新 {count} 首歌曲");}catch(OperationCanceledException){}catch(Exception ex){Toast("导入未完成",ex.Message,true);}finally{scanCancellation?.Dispose();scanCancellation=null;SetBusy(false);if(noticeProgress){noticeProgress=false;Notice.IsOpen=false;}}}
+    async Task Import(IEnumerable<string> paths,bool force=false){if(scanCancellation!=null){Toast("正在扫描音乐，请稍候");return;}scanCancellation=new();SetBusy(true);try{var count=await library.Import(paths,new Progress<string>(s=>SetProgressNotice("正在整理音乐库",s)),scanCancellation.Token,force);tracks=await Task.Run(library.Load);Filter();Toast("音乐库已更新",$"新增或更新 {count} 首歌曲");}catch(OperationCanceledException){}catch(Exception ex){Toast("导入未完成",ex.Message,true);}finally{scanCancellation?.Dispose();scanCancellation=null;SetBusy(false);if(noticeProgress){noticeProgress=false;Notice.IsOpen=false;}}}
     void Root_DragOver(object sender,DragEventArgs e){if(e.DataView.Contains(StandardDataFormats.StorageItems)){e.AcceptedOperation=DataPackageOperation.Copy;e.DragUIOverride.Caption="添加到 Luma 音乐库";}}
     async void Root_Drop(object sender,DragEventArgs e){if(e.DataView.Contains(StandardDataFormats.StorageItems)){var items=await e.DataView.GetStorageItemsAsync();await Import(items.Select(i=>i.Path));}}
     // 点击行为由设置决定：单击模式下 ItemClick 直接播放；双击模式下 ItemClick 只选中，DoubleTapped 才播放。
@@ -255,15 +363,21 @@ public sealed partial class MainWindow : Window
     static Track? ItemFromTapped(object? source){DependencyObject? node=source as DependencyObject;while(node is not null and not ListViewBase){if(node is ListViewItem{Content:Track t})return t;if(node is ButtonBase)return null;node=VisualTreeHelper.GetParent(node);}return null;}
     void EnsureQueued(Track t){if(!queue.Contains(t)){queue.Clear();foreach(var item in visible)queue.Add(item);}}
     async void PlayAll_Click(object sender,RoutedEventArgs e){if(visible.Count==0){ImportFolder_Click(sender,e);return;}queue.Clear();foreach(var t in visible)queue.Add(t);await Play(queue[0]);}
+    // cue 拆出的曲目 position 是"整轨内绝对秒"，limit 是本曲终点；两者都只有 cue 曲目非零。
+    static double CueStart(Track track)=>Math.Max(0,track.CueIndex);
+    static double CueLimit(Track track)=>track.CueIndex>0?Math.Max(track.CueIndex,track.CueIndex+track.Duration):0;
     async Task Play(Track track,double position=0)
     {
         if(audio==null){Toast("音频引擎不可用",error:true);return;}if(Device==null){await Settings();return;}
+        // position 语义是整轨内绝对秒：cue 曲目要在自己的起点之上叠加用户给的偏移。
+        double start=CueStart(track)+Math.Max(0,position);
+        double limit=CueLimit(track);
         int generation=++playGeneration;await playGate.WaitAsync();
         try{
             if(generation!=playGeneration)return;SetBusy(true);Notice.IsOpen=false;endSeen=DateTime.MinValue;
             // 历史档案可能给 WASAPI 设备存过 ASIO 后端，播放前按设备实际类型纠正。
             var profile=prefs.Profile;if(Device.Backend!=2&&profile.Backend==2)profile.Backend=Device.Backend;
-            await audio.Open(track,Device,profile,prefs.Volume,position);
+            await audio.Open(track,Device,profile,prefs.Volume,start,limit);
             if(FlexAsioConfig.LastWarning.Length>0)Toast("ASIO 提示",FlexAsioConfig.LastWarning);
             current=track;lastState=audio.State();prefs.LastTrack=track.Id;
             if(!queue.Any(t=>t.Id==track.Id))queue.Add(track);
@@ -343,9 +457,25 @@ public sealed partial class MainWindow : Window
     void Queue_Click(object sender,RoutedEventArgs e){bool open=QueuePanel.Visibility!=Visibility.Visible;QueuePanel.Visibility=open?Visibility.Visible:Visibility.Collapsed;if(open){Animate(QueuePanel);QueuePanel.UpdateLens();}}
     void QueueUp_Click(object sender,RoutedEventArgs e){int i=QueueList.SelectedIndex;if(i>0){queue.Move(i,i-1);QueueList.SelectedIndex=i-1;}}
     void QueueRemove_Click(object sender,RoutedEventArgs e){int i=QueueList.SelectedIndex;if(i>=0)queue.RemoveAt(i);}
+    async void ExportQueue_Click(object sender,RoutedEventArgs e)=>await ExportPlaylist(null);
+    // 拖拽重排后把新顺序落进 settings，队列本身就是 prefs.Queue 的投影。
+    void Queue_ReorderCompleted(ListViewBase sender,DragItemsCompletedEventArgs args)
+    {
+        if(args.Items.FirstOrDefault() is not Track moved)return;
+        // SelectedIndex 在 Drop 之后可能还是 -1，退回按对象在集合里的位置。
+        if(QueueList.SelectedIndex>=0)QueueList.SelectedIndex=Math.Min(QueueList.SelectedIndex,queue.Count-1);
+        prefs.Queue=queue.Select(t=>t.Id).ToList();AppPaths.Save(prefs);
+    }
     void MultiSelect_Click(object sender,RoutedEventArgs e){if(multiSelecting)ExitMultiSelect();else EnterMultiSelect();}
-    void EnterMultiSelect(){if(TrackList.Visibility!=Visibility.Visible)return;multiSelecting=true;TrackList.SelectionMode=ListViewSelectionMode.Multiple;TrackList.Margin=new Thickness(0,58,0,0);BatchBar.Visibility=Visibility.Visible;MultiSelectButton.Content="取消多选";UpdateSelectedCount();}
-    void ExitMultiSelect(){if(!multiSelecting)return;multiSelecting=false;TrackList.SelectedItems.Clear();TrackList.SelectionMode=ListViewSelectionMode.Single;TrackList.SelectedItem=null;TrackList.Margin=new Thickness(0);BatchBar.Visibility=Visibility.Collapsed;MultiSelectButton.Content="多选";}
+    void EnterMultiSelect(){if(TrackList.Visibility!=Visibility.Visible)return;multiSelecting=true;TrackList.SelectionMode=ListViewSelectionMode.Multiple;TrackList.Margin=new Thickness(0,58,0,0);BatchBar.Visibility=Visibility.Visible;MultiSelectButton.Content="取消多选";TrackList.CanDragItems=false;UpdateSelectedCount();}
+    void ExitMultiSelect(){if(!multiSelecting)return;multiSelecting=false;TrackList.SelectedItems.Clear();TrackList.SelectionMode=ListViewSelectionMode.Single;TrackList.SelectedItem=null;TrackList.Margin=new Thickness(0);BatchBar.Visibility=Visibility.Collapsed;MultiSelectButton.Content="多选";TrackList.CanDragItems=playlistFilter!=null;}
+    // 播放列表视图内拖拽重排：落库后重刷，恢复 DB 顺序为准的视图。
+    void TrackList_ReorderCompleted(ListViewBase sender,DragItemsCompletedEventArgs args)
+    {
+        if(playlistFilter is not long id||args.Items.FirstOrDefault() is not Track)return;
+        library.ReorderPlaylist(id,visible.Select(t=>t.Id).ToList());
+        Filter();Toast("播放列表顺序已更新");
+    }
     void TrackList_SelectionChanged(object sender,SelectionChangedEventArgs e){if(multiSelecting)UpdateSelectedCount();}
     void UpdateSelectedCount()=>SelectedCount.Text=$"已选择 {TrackList.SelectedItems.Count:N0} 首";
     List<Track> SelectedTracks()=>visible.Where(t=>TrackList.SelectedItems.Contains(t)).ToList();
@@ -392,6 +522,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
         var transparency=new ToggleSwitch{Header="减少透明效果",IsOn=prefs.ReducedTransparency,OnContent="开启",OffContent="关闭"};
         var motion=new ToggleSwitch{Header="减少动态效果",IsOn=prefs.ReducedMotion,OnContent="开启",OffContent="关闭"};
         var closeBehavior=new RadioButtons{Header="关闭窗口时",ItemsSource=new[]{"直接退出","最小化到系统托盘"},SelectedIndex=prefs.CloseToTray?1:0,Margin=new Thickness(0,4,0,0)};
+        var hotkeyHint=new TextBlock{Text="全局热键："+GlobalHotKeys.Description+"（窗口失焦或托盘驻留时仍可控制）",FontSize=11,TextWrapping=TextWrapping.Wrap,Foreground=Brush(200,172,194,176)};
         var qualityBox=new ComboBox{Header="视觉效果质量",ItemsSource=new[]{"自动（推荐）","轻量","完整"},SelectedIndex=Math.Clamp(prefs.VisualQuality,0,2),HorizontalAlignment=HorizontalAlignment.Stretch};
         var clickBehavior=new ComboBox{Header="列表点击播放方式",ItemsSource=new[]{"单击播放","双击播放"},SelectedIndex=prefs.DoubleClickPlay?1:0,HorizontalAlignment=HorizontalAlignment.Stretch};
         // 关于：版本号 + 手动检查更新（启动时也会自动检查一次，24 小时节流）
@@ -414,7 +545,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
             finally{updateChecking=false;checkUpdate.IsEnabled=true;}
         };
         var hint=new TextBlock{Text="独占模式会占用所选设备。DSD 透传时软件音量不可用，请使用 DAC 控制音量。",TextWrapping=TextWrapping.Wrap,FontSize=11,Foreground=Brush(200,172,194,176)};
-        var scan=new Button{Content="重新扫描已添加的音乐文件夹"};scan.Click+=async(_,_)=>await Import(prefs.Roots);
+        var scan=new Button{Content="重新扫描已添加的音乐文件夹（更新曲目信息）"};scan.Click+=async(_,_)=>{await Import(prefs.Roots,true);if(current!=null)await ShowTrack(current);};
         void LoadProfile(AudioDevice d){
             var key=$"{d.Backend}:{d.Id}";var p=prefs.Profiles.TryGetValue(key,out var profile)?profile:new DeviceProfile{Backend=d.Backend};
             // 输出方式跟随设备类型：WASAPI 设备只有共享/独占，ASIO 驱动只有 ASIO，两者不可交叉。
@@ -442,7 +573,7 @@ var next=new MenuFlyoutItem{Text="下一首播放"};next.Click+=(_,_)=>{int inde
         void Section(string title,params UIElement[] elements){panel.Children.Add(new TextBlock{Text=title,FontSize=20,FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,Margin=new Thickness(0,12,0,0)});foreach(var el in elements)panel.Children.Add(el);}
         Section("外观",themeBox,auroraCheck,qualityBox,motion,transparency);
         Section("播放输出",deviceBox,modeBox,asioHint,asioInstall,asioTarget,dsdBox,dop,rate,downmix,mapping,hint);
-        Section("通用",onlineCheck,closeBehavior,clickBehavior,scan,about);
+        Section("通用",onlineCheck,closeBehavior,hotkeyHint,clickBehavior,scan,about);
         var dialog=Dialog("设置",new ScrollViewer{Content=panel,MaxHeight=530},"保存设置");
         void SaveAppearancePreferences(){
             prefs.Online=onlineCheck.IsOn;prefs.ReducedMotion=motion.IsOn;prefs.ReducedTransparency=transparency.IsOn;

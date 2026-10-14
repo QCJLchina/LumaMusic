@@ -117,7 +117,22 @@
             <Button Click="BrowseBack_Click" Content="返回浏览" Style="{StaticResource QuietButton}" Margin="285,0,0,0" HorizontalAlignment="Left" Visibility="Collapsed" x:Name="BrowseBack" />
           </Grid>
           <Grid Grid.Row="2">
-            <ListView x:Name="TrackList" IsItemClickEnabled="True" ItemClick="Track_ItemClick" DoubleTapped="Track_DoubleTapped" SelectionChanged="TrackList_SelectionChanged" SelectionMode="Single" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListView x:Name="TrackList" IsItemClickEnabled="True" ItemClick="Track_ItemClick" DoubleTapped="Track_DoubleTapped" SelectionChanged="TrackList_SelectionChanged" SelectionMode="Single" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AllowDrop="True" CanDragItems="False" DragItemsCompleted="TrackList_ReorderCompleted">
+              <ListView.Header>
+                <Grid Height="30" Margin="0,0,0,6" ColumnSpacing="10">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="44" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="110" />
+                    <ColumnDefinition Width="50" />
+                    <ColumnDefinition Width="64" />
+                    <ColumnDefinition Width="32" />
+                  </Grid.ColumnDefinitions>
+                  <Button Grid.Column="1" x:Name="SortTitle" Tag="title" Click="Sort_Click" Style="{StaticResource QuietButton}" HorizontalAlignment="Left" Padding="4,2" FontSize="12" Content="标题" />
+                  <Button Grid.Column="2" x:Name="SortQuality" Tag="quality" Click="Sort_Click" Style="{StaticResource QuietButton}" HorizontalAlignment="Left" Padding="4,2" FontSize="12" Content="格式" />
+                  <Button Grid.Column="3" x:Name="SortDuration" Tag="duration" Click="Sort_Click" Style="{StaticResource QuietButton}" HorizontalAlignment="Left" Padding="4,2" FontSize="12" Content="时长" />
+                </Grid>
+              </ListView.Header>
               <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                   <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -314,7 +329,10 @@
           <Button HorizontalAlignment="Right" VerticalAlignment="Top" Click="Queue_Click" Style="{StaticResource QuietButton}" Padding="5">
             <FontIcon Glyph="" FontSize="12" />
           </Button>
-          <ListView Grid.Row="1" x:Name="QueueList" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="Queue_ItemClick" DoubleTapped="Queue_DoubleTapped">
+          <Button HorizontalAlignment="Right" VerticalAlignment="Top" Click="ExportQueue_Click" Style="{StaticResource QuietButton}" Padding="5" ToolTipService.ToolTip="导出队列为 m3u" AutomationProperties.Name="导出队列为 m3u">
+            <FontIcon Glyph="&#xE896;" FontSize="12" />
+          </Button>
+          <ListView Grid.Row="1" x:Name="QueueList" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="Queue_ItemClick" DoubleTapped="Queue_DoubleTapped" CanDragItems="True" CanReorderItems="True" AllowDrop="True" DragItemsCompleted="Queue_ReorderCompleted">
             <ListView.ItemTemplate>
               <DataTemplate x:DataType="local:Track">
                 <StackPanel Margin="0,7" Spacing="5">
