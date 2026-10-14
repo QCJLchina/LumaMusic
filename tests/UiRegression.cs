@@ -167,7 +167,15 @@ public sealed partial class MainWindow
                 new { cpuMs = (process.TotalProcessorTime - cpu).TotalMilliseconds, workingSetMB = process.WorkingSet64 / 1048576,
                     frames = frames.Count, p95UiCallbackMs = ordered.Length > 0 ? ordered[(int)((ordered.Length - 1) * .95)] : 0,
                     underrunsBefore = underruns, underrunsAfter = lastState.Underruns });
+            // 真 seek：luma_seek 保留已取得的设备，只重建解码器，
+            // 所以 current 指针不应变化（整首重开会先 engine.reset() 再 ShowTrack）。
+            var beforeSeek = current?.Id;
             await SeekTo(20); await Settle(500); Check("seek", lastState.Position >= 19 && !lastState.Failed);
+            Check("seek keeps the same track open", current?.Id == beforeSeek, new { beforeSeek, after = current?.Id });
+            // 连跳几次确认 ring 缓冲重置正确（不会把两段音频拼起来）。
+            await SeekTo(5); await Settle(400); await SeekTo(25); await Settle(400);
+            Check("repeated seeks stay in range", !lastState.Failed && lastState.Position >= 24 && lastState.Position <= 26,
+                new { position = lastState.Position, duration = lastState.Duration, underruns = lastState.Underruns });
             audio.Pause(true); await Settle(300); Check("pause", !lastState.Playing);
             audio.Pause(false); await Settle(300); Check("resume", lastState.Playing);
             await audio.Stop(); await Settle();
@@ -257,6 +265,13 @@ public sealed partial class MainWindow
             Check("cue durations follow INDEX gaps", Math.Abs(cueTracks[0].Duration - 5) < .2 && Math.Abs(cueTracks[1].Duration - 10) < .2 && Math.Abs(cueTracks[2].Duration - 15) < .2,
                 cueTracks.Select(t => t.Duration));
             Check("cue tracks are not overwritten by whole-file tags", cueTracks.Select(t => t.Title).Distinct().Count() == 3);
+            Check("cue tracks are marked from cue", cueTracks.All(t => t.FromCue) && !imported.FromCue);
+
+            var parsed = CueSheet.Parse("FILE \"整轨.wav\" WAVE\nTRACK 01 AUDIO\nTITLE First\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nTITLE PreludeOnly\nINDEX 00 00:01:00\nTRACK 03 AUDIO\nTITLE Second\nINDEX 01 00:05:00\n");
+            Check("cue parse keeps a zero start", parsed != null && parsed.Entries[0].Start == 0 && parsed.Entries[0].Title == "First");
+            Check("cue parse drops index 00 only tracks", parsed != null && parsed.Entries.Count == 2 && parsed.Entries.All(e => e.Title != "PreludeOnly"));
+            Check("cue parse rejects sheet without file", CueSheet.Parse("TRACK 01 AUDIO\nINDEX 01 00:00:00") == null);
+            Check("cue parse rejects sheet without index 01", CueSheet.Parse("FILE \"a.wav\" WAVE\nTRACK 01 AUDIO\nINDEX 00 00:00:00") == null);
 
             // 重复导入必须幂等：cue 曲目 Id 由 文件+序号 决定，不该翻倍。
             var beforeCue = tracks.Count(t => t.Path.Equals(cueFile, StringComparison.OrdinalIgnoreCase));
@@ -266,6 +281,9 @@ public sealed partial class MainWindow
             // 播放：非首曲必须从自己的 INDEX 起点开始，且 duration 覆盖本曲而不是整轨。
             await Play(cueTracks[1]); await Settle(900);
             Check("cue playback starts at its own index", lastState.Playing && lastState.Duration < 20 && !lastState.Failed,
+                new { duration = lastState.Duration, position = lastState.Position });
+            await Play(cueTracks[0]); await Settle(900);
+            Check("cue first track stops at its own end", lastState.Playing && lastState.Duration < 10 && !lastState.Failed,
                 new { duration = lastState.Duration, position = lastState.Position });
 
             // ---- 排序 ----
@@ -290,6 +308,11 @@ public sealed partial class MainWindow
             var reordered = new[] { orderIds[2], orderIds[0], orderIds[1] };
             library.ReorderPlaylist(pl.Id, reordered);
             Check("playlist reorder persists", library.PlaylistTracks(pl.Id).SequenceEqual(reordered));
+            var nav = PlaylistNav.Children.OfType<Button>().First(b => b.Tag is Playlist p && p.Id == pl.Id);
+            playlistFilter = pl.Id; favoritesOnly = false; albumFilter = null; artistFilter = null;
+            PageTitle.Text = ((Playlist)nav.Tag).Name; showAlbums = false; showArtists = false;
+            ShowLibrary(); Filter(); await Settle();
+            Check("playlist view follows stored order", visible.Select(t => t.Id).SequenceEqual(library.PlaylistTracks(pl.Id)));
             library.RenamePlaylist(pl.Id, "改名后的列表");
             Check("playlist rename", library.Playlists().First(p => p.Id == pl.Id).Name == "改名后的列表");
             var m3u = Path.Combine(Path.GetTempPath(), "luma-regression.m3u");

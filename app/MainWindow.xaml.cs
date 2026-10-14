@@ -50,6 +50,8 @@ public sealed partial class MainWindow : Window
     CancellationTokenSource mediaCancellation=new();CancellationTokenSource? scanCancellation;
     List<LyricLine> lyricLines=[];readonly List<Button> lyricButtons=[];
     PlaybackState lastState=new();bool showAlbums=true,showArtists;bool ready,updatingSlider,seeking,favoritesOnly,nowVisible,closing,reallyClosing,multiSelecting;
+    // 输出设备断开后等待恢复：记住原来的设备身份，设备回来时按身份重新对齐（索引会漂移）。
+    bool waitingForDevice;AudioDevice? deviceWasGone;
     string? albumFilter,artistFilter;long? playlistFilter;int playGeneration,lyricIndex=-2;double lyricOffset;
     DateTime endSeen=DateTime.MinValue,lastSave=DateTime.MinValue;string rawLyrics="";
     AudioDevice? Device=>devices.FirstOrDefault(d=>d.Id==prefs.DeviceId&&d.Backend==prefs.DeviceBackend);
@@ -226,10 +228,12 @@ public sealed partial class MainWindow : Window
         if(favoritesOnly)source=source.Where(t=>t.Favorite);
         if(albumFilter!=null)source=source.Where(t=>t.AlbumKey==albumFilter);
         if(artistFilter!=null)source=source.Where(t=>t.Artist==artistFilter);
-        if(playlistFilter is long id){var ids=library.PlaylistTracks(id);source=source.Where(t=>ids.Contains(t.Id));}
+        List<string>? playlistOrder=null;
+        if(playlistFilter is long id){playlistOrder=library.PlaylistTracks(id);var allowed=playlistOrder.ToHashSet();source=source.Where(t=>allowed.Contains(t.Id));}
         var search=SearchBox.Text.Trim();if(search.Length>0)source=source.Where(t=>($"{t.Title} {t.Artist} {t.Album}").Contains(search,StringComparison.CurrentCultureIgnoreCase));
         // 播放列表按用户排过的顺序走，其余视图套用当前排序列。
-        if(playlistFilter==null)source=Sort(source);
+        if(playlistOrder!=null){var map=source.ToDictionary(t=>t.Id);source=playlistOrder.Where(map.ContainsKey).Select(trackId=>map[trackId]);}
+        else source=Sort(source);
         visible.Clear();foreach(var t in source)visible.Add(t);
         TrackCount.Text=$"{visible.Count:N0} 首歌曲";LibraryCount.Text=$"{tracks.Select(t=>t.AlbumKey).Distinct().Count():N0} 张专辑 · {tracks.Count:N0} 首歌曲";
         EmptyState.Visibility=visible.Count==0?Visibility.Visible:Visibility.Collapsed;
@@ -363,9 +367,9 @@ public sealed partial class MainWindow : Window
     static Track? ItemFromTapped(object? source){DependencyObject? node=source as DependencyObject;while(node is not null and not ListViewBase){if(node is ListViewItem{Content:Track t})return t;if(node is ButtonBase)return null;node=VisualTreeHelper.GetParent(node);}return null;}
     void EnsureQueued(Track t){if(!queue.Contains(t)){queue.Clear();foreach(var item in visible)queue.Add(item);}}
     async void PlayAll_Click(object sender,RoutedEventArgs e){if(visible.Count==0){ImportFolder_Click(sender,e);return;}queue.Clear();foreach(var t in visible)queue.Add(t);await Play(queue[0]);}
-    // cue 拆出的曲目 position 是"整轨内绝对秒"，limit 是本曲终点；两者都只有 cue 曲目非零。
+    // cue 拆出的曲目 position 是整轨内绝对秒，limit 是本曲终点。首曲起点为 0，靠 FromCue 而不是 CueIndex 判断要不要截断。
     static double CueStart(Track track)=>Math.Max(0,track.CueIndex);
-    static double CueLimit(Track track)=>track.CueIndex>0?Math.Max(track.CueIndex,track.CueIndex+track.Duration):0;
+    static double CueLimit(Track track)=>track.FromCue?Math.Max(track.CueIndex,track.CueIndex+track.Duration):0;
     async Task Play(Track track,double position=0)
     {
         if(audio==null){Toast("音频引擎不可用",error:true);return;}if(Device==null){await Settings();return;}
@@ -432,7 +436,10 @@ public sealed partial class MainWindow : Window
     {
         if(audio==null||audio.Busy||closing)return;
         lastState=audio.State();var state=lastState;Ambient.SetPlaying(state.Playing&&!state.Failed&&!state.Ended);
-        if(state.Failed){await audio.Stop();PlayIcon.Glyph="\uE768";Toast("播放已停止",state.Error.Length>0?state.Error:"音频设备断开或驱动状态发生变化。请重新选择输出设备。",true);return;}
+        if(state.Failed){
+            // 设备被拔掉/驱动重置：先停引擎再进入等待状态，设备回来后自动续播当前曲目。
+            if(state.DeviceGone&&current!=null){await audio.Stop();waitingForDevice=true;deviceWasGone=Device;PlayIcon.Glyph="\uE768";Toast("输出设备已断开","正在等待设备恢复…");return;}
+            await audio.Stop();PlayIcon.Glyph="\uE768";Toast("播放已停止",state.Error.Length>0?state.Error:"音频设备断开或驱动状态发生变化。请重新选择输出设备。",true);return;}
         if(state.Duration>0){FocusInformation(Math.Clamp((int)(state.Position/state.Duration*5),0,4));SignalPath.Text=state.Chain;VolumeSlider.IsEnabled=!(state.Dsd&&state.Mode!=0);Elapsed.Text=Time(state.Position);Total.Text=Time(state.Duration);if(!seeking&&!seekTimer.IsEnabled){updatingSlider=true;SeekSlider.Maximum=state.Duration;SeekSlider.Value=state.Position;updatingSlider=false;}PlayIcon.Glyph=state.Playing?"\uE769":"\uE768";
             int index=LyricsService.Current(lyricLines,state.Position+lyricOffset);if(index!=lyricIndex){if(lyricIndex>=0&&lyricIndex<lyricButtons.Count)((TextBlock)lyricButtons[lyricIndex].Content).Foreground=InactiveLyric();lyricIndex=index;if(index>=0&&index<lyricButtons.Count){var b=lyricButtons[index];((TextBlock)b.Content).Foreground=ActiveLyric();if(nowVisible){var point=b.TransformToVisual(LyricsPanel).TransformPoint(new(0,0));LyricsScroll.ChangeView(null,Math.Max(0,point.Y-LyricsScroll.ActualHeight*.36),null,ReduceMotion);}}
             // 参考玻璃风格：当前行全亮，其余按距离衰减透明度，像蒙在毛玻璃后面。
@@ -445,7 +452,18 @@ public sealed partial class MainWindow : Window
     async Task Advance(int direction,bool ended=false){if(current==null)return;if(prefs.Repeat==2&&ended){await Play(current);return;}var list=queue.Count>0?queue.ToList():visible.ToList();if(list.Count==0)return;int i=list.FindIndex(t=>t.Id==current.Id);int next=prefs.Shuffle&&list.Count>1?(i+Random.Shared.Next(1,list.Count))%list.Count:i+direction;if(next>=list.Count){if(prefs.Repeat==1)next=0;else{if(audio!=null)await audio.Stop();PlayIcon.Glyph="\uE768";return;}}if(next<0)next=list.Count-1;await Play(list[next]);}
     async void Previous_Click(object sender,RoutedEventArgs e){if(lastState.Position>3)await SeekTo(0);else await Advance(-1);}
     async void Next_Click(object sender,RoutedEventArgs e)=>await Advance(1);
-    async Task SeekTo(double position){if(current==null||audio==null||audio.Busy)return;bool wasPaused=!lastState.Playing;await Play(current,Math.Clamp(position,0,Math.Max(0,current.Duration-.05)));if(wasPaused)audio.Pause(true);}
+    // 优先走引擎的 luma_seek：不释放已取得的独占设备，拖进度条不会被别的程序抢走。
+// 引擎侧不支持时才回落到整首重开（Play）。
+async Task SeekTo(double position)
+    {
+        if(current==null||audio==null||audio.Busy)return;
+        double target=Math.Clamp(position,0,Math.Max(0,lastState.Duration>0?lastState.Duration:current.Duration));
+        bool wasPaused=!lastState.Playing;
+        double absolute=CueStart(current)+target;
+        if(audio.Seek(absolute)){lastState=audio.State();if(wasPaused)audio.Pause(true);return;}
+        await Play(current,target);
+        if(wasPaused)audio.Pause(true);
+    }
     void Seek_Changed(object sender,RangeBaseValueChangedEventArgs e){if(!ready||updatingSlider)return;Elapsed.Text=Time(e.NewValue);if(!seeking){seekTimer.Stop();seekTimer.Start();}}
     void Volume_Changed(object sender,RangeBaseValueChangedEventArgs e){if(!ready)return;prefs.Volume=(float)e.NewValue/100;audio?.Volume(prefs.Volume);}
     void SetModeIcons(){ShuffleIcon.Foreground=prefs.Shuffle?AccentBrush():AccentDict()["TextSecondary"] as SolidColorBrush ?? new SolidColorBrush(OnAmbient(160));RepeatIcon.Foreground=prefs.Repeat>0?AccentBrush():AccentDict()["TextSecondary"] as SolidColorBrush ?? new SolidColorBrush(OnAmbient(160));RepeatIcon.Glyph=prefs.Repeat==2?"\uE8ED":"\uE8EE";}

@@ -23,8 +23,10 @@ public class Track : INotifyPropertyChanged
     public int Year {get;set;}
     public string Genre {get;set;}="";
     public string AlbumArtist {get;set;}="";
-    // cue 拆轨的起始秒；<=0 表示整轨播放（与 position 语义一致）。
+    // cue 拆轨的起始秒。是否截断由 FromCue 决定：首曲起点就是 0，不能拿 CueIndex 判断。
     public double CueIndex {get;set;}
+    // 同名 cue 拆出的曲目。旧库缺省 false，重新扫描后才会带上播放上限。
+    public bool FromCue {get;set;}
     string cover=""; public string Cover {get=>cover;set{cover=value;OnChanged();}}
     // x:Bind 函数直接返回 ImageSource，绕开 XamlBindingHelper.ConvertValue——
     // 它对空字符串（甚至 null）都会抛 ArgumentException，且未处理异常会让整个应用崩溃。
@@ -50,6 +52,7 @@ public class PlaybackState
     public string Error {get;set;}=""; public double Position {get;set;} public double Duration {get;set;}
     public int SourceRate {get;set;} public int SourceChannels {get;set;} public int Rate {get;set;} public int Channels {get;set;}
     public int Bits {get;set;} public bool Dsd {get;set;} public int Mode {get;set;} public int Backend {get;set;} public long Underruns {get;set;}
+    public bool DeviceGone {get;set;}
     public string SourceLabel=>Dsd?$"DSD{SourceRate/44100}":$"PCM {SourceRate/1000d:0.#} kHz";
     public string OutputLabel=>Dsd&&Mode==2?$"Native DSD · {Rate/1000000d:0.###} MHz":Dsd&&Mode==1?$"DoP · {Rate/1000d:0.#} kHz":$"PCM · {Rate/1000d:0.#} kHz";
     public string BackendLabel=>Backend==2?"ASIO":Backend==1?"WASAPI 独占":"WASAPI 共享";

@@ -55,7 +55,25 @@ public sealed partial class MainWindow
             if (activeVisuals != active) SetVisualActivity(active);
             var policy = ReadSystemAppearance();
             if (policy != lastSystemAppearance) { lastSystemAppearance = policy; RefreshAppearance(); }
+            PollDeviceRecovery();
         };
+    }
+    // 输出设备拔掉后（USB DAC / 驱动重置）每 2 秒探一次：设备回来了就把当前曲目续上。
+    // 挂在已有的 appearanceTimer 上，不另开定时器。
+    async void PollDeviceRecovery()
+    {
+        if (!waitingForDevice || closing || audio == null || current == null) return;
+        List<AudioDevice> fresh;
+        try { fresh = audio.Devices(); } catch { return; }
+        var back = fresh.FirstOrDefault(d => deviceWasGone != null && d.Id == deviceWasGone.Id && d.Backend == deviceWasGone.Backend);
+        if (back == null) return;
+        // 设备索引可能已经漂移（中间插过别的设备），按身份重新对齐后再播放。
+        prefs.DeviceId = back.Id; prefs.DeviceBackend = back.Backend;
+        Services.AppPaths.Save(prefs);
+        devices = fresh;
+        waitingForDevice = false; deviceWasGone = null;
+        Toast("输出设备已恢复", back.Name);
+        await Play(current, lastState.Position);
     }
     void SystemAppearanceChanged(UISettings sender, object args) => DispatcherQueue.TryEnqueue(RefreshAppearance);
     (bool contrast, bool effects, bool animations, bool saving) ReadSystemAppearance()

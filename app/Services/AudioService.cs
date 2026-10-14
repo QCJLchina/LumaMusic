@@ -10,6 +10,7 @@ public sealed class AudioService : IDisposable
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern IntPtr luma_state();
     [DllImport(Dll,CharSet=CharSet.Unicode,CallingConvention=CallingConvention.Cdecl)]static extern int luma_open(string path,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,int[] map,float volume,double position,double limit);
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern int luma_pause(int pause);
+    [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern int luma_seek(double position);
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern void luma_stop();
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern void luma_volume(float volume);
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern void luma_shutdown();
@@ -61,6 +62,9 @@ public sealed class AudioService : IDisposable
         FlexAsioConfig.Ensure(FlexAsioConfig.Build(target,dop));
     }
     public void Pause(bool pause){if(!Busy&&luma_pause(pause?1:0)==0)throw new InvalidOperationException(Error());}
+    // 真 seek：引擎保留已取得的输出设备（含独占句柄），只重建解码器。
+    // 返回 false 表示引擎侧不可用，调用方回落到整首重开。
+    public bool Seek(double position){if(Busy)return false;if(luma_seek(position)==0){AppPaths.Log("luma_seek failed: "+Error());return false;}return true;}
     public void Volume(float volume){if(!Busy)luma_volume(volume);}
     public async Task Stop(){await serial.WaitAsync();Busy=true;try{await Task.Run(luma_stop);}finally{Busy=false;serial.Release();}}
     public void Dispose(){luma_shutdown();serial.Dispose();}
