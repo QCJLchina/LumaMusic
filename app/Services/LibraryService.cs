@@ -74,7 +74,7 @@ public class LibraryService
                         Id=Key(file.ToUpperInvariant()+"#"+e.Number),Path=file,Subsong=e.Number,Title=e.Title.Length>0?e.Title:first.Title,
                         Artist=e.Artist.Length>0?e.Artist:first.Artist,Album=sheet.Album.Length>0?sheet.Album:first.Album,
                         AlbumArtist=sheet.AlbumArtist,Genre=sheet.Genre,Year=int.TryParse(sheet.Year,out var y)?y:0,
-                        TrackNumber=e.Number,Duration=Math.Max(0,end-e.Start),CueIndex=e.Start,Format=format,Modified=first.Modified});
+                        TrackNumber=e.Number,Duration=Math.Max(0,end-e.Start),CueIndex=e.Start,FromCue=true,Format=format,Modified=first.Modified});
                 }
             }else tracks.Add(first);
         }
@@ -83,7 +83,7 @@ public class LibraryService
             if(picture!=null&&picture.Data.Count<=12*1024*1024){cover=System.IO.Path.Combine(AppPaths.Cache,Key(file)+"-embedded.img");await File.WriteAllBytesAsync(cover,picture.Data.Data,token);}
             foreach(var t in tracks){if(format!="ISO"){
                 // cue 拆出的曲目自带标题/艺术家/专辑，绝不能被整轨的标签覆盖成同一个值。
-                bool fromCue=t.CueIndex>0;
+                bool fromCue=t.FromCue;
                 if(!fromCue){
                     if(!string.IsNullOrWhiteSpace(tag.Tag.Title))t.Title=tag.Tag.Title;
                     if(tag.Tag.Performers.Length>0)t.Artist=string.Join(" / ",tag.Tag.Performers);
@@ -143,15 +143,25 @@ public class LibraryService
     public List<string> PlaylistTracks(long id){using var c=Connect();using var cmd=c.CreateCommand();cmd.CommandText="SELECT track FROM playlist_tracks WHERE playlist=$p ORDER BY position";cmd.Parameters.AddWithValue("$p",id);using var r=cmd.ExecuteReader();var list=new List<string>();while(r.Read())list.Add(r.GetString(0));return list;}
     public void RenamePlaylist(long id,string name){if(string.IsNullOrWhiteSpace(name))return;using var c=Connect();using var cmd=c.CreateCommand();cmd.CommandText="UPDATE playlists SET name=$n WHERE id=$p";cmd.Parameters.AddWithValue("$n",name.Trim());cmd.Parameters.AddWithValue("$p",id);cmd.ExecuteNonQuery();}
     public void ClearPlaylist(long id){using var c=Connect();using var cmd=c.CreateCommand();cmd.CommandText="DELETE FROM playlist_tracks WHERE playlist=$p";cmd.Parameters.AddWithValue("$p",id);cmd.ExecuteNonQuery();}
-    // 整体按传入顺序重写 position；只保留仍存在的曲目，避免曲库移除后留下悬空行。
+    // 按传入顺序重写整张列表。搜索过滤后拖拽只会带上可见子集，没出现的曲目按原相对顺序接在后面，避免被丢掉。
     public void ReorderPlaylist(long id,IReadOnlyList<string> ordered)
     {
         if(ordered.Count==0)return;
-        var unique=new List<string>();var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach(var t in ordered)if(seen.Add(t))unique.Add(t);
         using var c=Connect();using var tx=c.BeginTransaction();
-        for(int i=0;i<unique.Count;i++){
-            using var cmd=c.CreateCommand();cmd.Transaction=tx;cmd.CommandText="UPDATE playlist_tracks SET position=$pos WHERE playlist=$p AND track=$t";cmd.Parameters.AddWithValue("$pos",i);cmd.Parameters.AddWithValue("$p",id);cmd.Parameters.AddWithValue("$t",unique[i]);cmd.ExecuteNonQuery();
+        var current=new List<string>();
+        using(var read=c.CreateCommand()){
+            read.Transaction=tx;read.CommandText="SELECT track FROM playlist_tracks WHERE playlist=$p ORDER BY position";read.Parameters.AddWithValue("$p",id);
+            using var rows=read.ExecuteReader();while(rows.Read())current.Add(rows.GetString(0));
+        }
+        var member=current.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var next=new List<string>();
+        foreach(var track in ordered)if(member.Contains(track)&&seen.Add(track))next.Add(track);
+        foreach(var track in current)if(seen.Add(track))next.Add(track);
+        using(var del=c.CreateCommand()){del.Transaction=tx;del.CommandText="DELETE FROM playlist_tracks WHERE playlist=$p";del.Parameters.AddWithValue("$p",id);del.ExecuteNonQuery();}
+        for(int i=0;i<next.Count;i++){
+            using var cmd=c.CreateCommand();cmd.Transaction=tx;cmd.CommandText="INSERT INTO playlist_tracks(playlist,track,position) VALUES($p,$t,$pos)";
+            cmd.Parameters.AddWithValue("$p",id);cmd.Parameters.AddWithValue("$t",next[i]);cmd.Parameters.AddWithValue("$pos",i);cmd.ExecuteNonQuery();
         }
         tx.Commit();
     }

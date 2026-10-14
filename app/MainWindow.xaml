@@ -326,12 +326,14 @@
             <RowDefinition Height="38" />
           </Grid.RowDefinitions>
           <TextBlock Text="接下来播放" FontSize="20" FontWeight="SemiBold" />
-          <Button HorizontalAlignment="Right" VerticalAlignment="Top" Click="Queue_Click" Style="{StaticResource QuietButton}" Padding="5">
-            <FontIcon Glyph="" FontSize="12" />
-          </Button>
-          <Button HorizontalAlignment="Right" VerticalAlignment="Top" Click="ExportQueue_Click" Style="{StaticResource QuietButton}" Padding="5" ToolTipService.ToolTip="导出队列为 m3u" AutomationProperties.Name="导出队列为 m3u">
-            <FontIcon Glyph="&#xE896;" FontSize="12" />
-          </Button>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Spacing="4">
+            <Button Click="ExportQueue_Click" Style="{StaticResource QuietButton}" Padding="5" ToolTipService.ToolTip="导出队列为 m3u" AutomationProperties.Name="导出队列为 m3u">
+              <FontIcon Glyph="&#xE896;" FontSize="12" />
+            </Button>
+            <Button Click="Queue_Click" Style="{StaticResource QuietButton}" Padding="5" ToolTipService.ToolTip="关闭队列" AutomationProperties.Name="关闭队列">
+              <FontIcon Glyph="" FontSize="12" />
+            </Button>
+          </StackPanel>
           <ListView Grid.Row="1" x:Name="QueueList" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="Queue_ItemClick" DoubleTapped="Queue_DoubleTapped" CanDragItems="True" CanReorderItems="True" AllowDrop="True" DragItemsCompleted="Queue_ReorderCompleted">
             <ListView.ItemTemplate>
               <DataTemplate x:DataType="local:Track">
