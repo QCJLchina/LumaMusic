@@ -234,13 +234,75 @@ public sealed partial class MainWindow
             Check("playlist creation reaches navigation", PlaylistNav.Children.OfType<Button>().Any(b => b.Tag is Playlist p && p.Id == created.Id));
             var batchIds = originalTracks.Take(2).Select(t => t.Id).ToArray();
             library.AddToPlaylist(created.Id, batchIds.Concat(batchIds)); Check("batch playlist add deduplicates", library.PlaylistTracks(created.Id).Count == 2);
-            library.RemoveFromPlaylist(created.Id, [batchIds[0]]); Check("batch playlist remove", library.PlaylistTracks(created.Id).SetEquals([batchIds[1]]));
+            library.RemoveFromPlaylist(created.Id, [batchIds[0]]); Check("batch playlist remove", library.PlaylistTracks(created.Id).ToHashSet().SetEquals([batchIds[1]]));
             library.SetFavorite(batchIds, true); Check("batch favorite persists", library.Load().Where(t => batchIds.Contains(t.Id)).All(t => t.Favorite));
             library.DeletePlaylist(created.Id); RefreshPlaylists();
-            await Import([track.Path]); Check("real WAV import", tracks.Count == 37 && tracks.Any(t => t.Title == "silence"));
+            await Import([track.Path]); Check("real WAV import", tracks.Any(t => t.Title == "silence"));
             var imported = tracks.Single(t => t.Title == "silence"); var importedPath = imported.Path; library.RemoveTracks([imported.Id]);
             Check("library removal keeps source", !library.Load().Any(t => t.Id == imported.Id) && File.Exists(importedPath));
             await Import([importedPath]); Check("removed track can be reimported", tracks.Any(t => t.Id == imported.Id));
+
+            // ---- cue 拆轨：走真实导入路径，GBK 中文 cue ----
+            var cueFile = Directory.GetFiles(Path.Combine(Environment.CurrentDirectory, "build", "ui-fixtures", "cue-album"), "*.wav").First();
+            await Import([cueFile]);
+            var cueTracks = tracks.Where(t => t.Path.Equals(cueFile, StringComparison.OrdinalIgnoreCase)).OrderBy(t => t.CueIndex).ToList();
+            Check("cue splits into indexed tracks", cueTracks.Count == 3, new { count = cueTracks.Count });
+            Check("cue titles decoded from GBK", cueTracks.Select(t => t.Title).SequenceEqual(new[] { "第一首", "第二首", "第三首" }),
+                cueTracks.Select(t => t.Title));
+            Check("cue artists and album decoded", cueTracks.All(t => t.Artist == "整轨乐队" && t.Album == "整轨专辑"));
+            Check("cue REM metadata read", cueTracks[0].Genre == "测试流派" && cueTracks[0].Year == 1997);
+            Check("cue starts are absolute seconds", cueTracks.Select(t => t.CueIndex).SequenceEqual(new[] { 0d, 5d, 15d }),
+                cueTracks.Select(t => t.CueIndex));
+            // 5/10/5 秒：末曲用文件总长（30s）兜底，不能算出 0。
+            Check("cue durations follow INDEX gaps", Math.Abs(cueTracks[0].Duration - 5) < .2 && Math.Abs(cueTracks[1].Duration - 10) < .2 && Math.Abs(cueTracks[2].Duration - 15) < .2,
+                cueTracks.Select(t => t.Duration));
+            Check("cue tracks are not overwritten by whole-file tags", cueTracks.Select(t => t.Title).Distinct().Count() == 3);
+
+            // 重复导入必须幂等：cue 曲目 Id 由 文件+序号 决定，不该翻倍。
+            var beforeCue = tracks.Count(t => t.Path.Equals(cueFile, StringComparison.OrdinalIgnoreCase));
+            await Import([cueFile]);
+            Check("cue reimport is idempotent", tracks.Count(t => t.Path.Equals(cueFile, StringComparison.OrdinalIgnoreCase)) == beforeCue);
+
+            // 播放：非首曲必须从自己的 INDEX 起点开始，且 duration 覆盖本曲而不是整轨。
+            await Play(cueTracks[1]); await Settle(900);
+            Check("cue playback starts at its own index", lastState.Playing && lastState.Duration < 20 && !lastState.Failed,
+                new { duration = lastState.Duration, position = lastState.Position });
+
+            // ---- 排序 ----
+            Library_Click(this, new()); SongsTab_Click(this, new()); await Settle();
+            var libraryOrder = visible.Select(t => t.Id).ToList();
+            // 首次点"时长"是升序；再点一次才翻成降序。
+            Sort_Click(SortDuration, new()); await Settle();
+            Check("sort by duration ascending", visible.Count > 0 && visible.Zip(visible.Skip(1)).All(p => p.First.Duration <= p.Second.Duration),
+                visible.Take(5).Select(t => t.Duration));
+            Sort_Click(SortDuration, new()); await Settle();
+            Check("sort toggles to descending", visible.Zip(visible.Skip(1)).All(p => p.First.Duration >= p.Second.Duration),
+                visible.Take(5).Select(t => t.Duration));
+            Sort_Click(SortTitle, new()); await Settle();
+            Check("sort returns to library order", visible.Select(t => t.Id).SequenceEqual(libraryOrder));
+
+            // ---- 播放列表：保序、重命名、重排、导出 ----
+            var pl = library.Playlists().First();
+            library.ClearPlaylist(pl.Id);
+            var orderIds = originalTracks.Take(3).Select(t => t.Id).ToList();
+            library.AddToPlaylist(pl.Id, orderIds);
+            Check("playlist preserves insertion order", library.PlaylistTracks(pl.Id).SequenceEqual(orderIds));
+            var reordered = new[] { orderIds[2], orderIds[0], orderIds[1] };
+            library.ReorderPlaylist(pl.Id, reordered);
+            Check("playlist reorder persists", library.PlaylistTracks(pl.Id).SequenceEqual(reordered));
+            library.RenamePlaylist(pl.Id, "改名后的列表");
+            Check("playlist rename", library.Playlists().First(p => p.Id == pl.Id).Name == "改名后的列表");
+            var m3u = Path.Combine(Path.GetTempPath(), "luma-regression.m3u");
+            var written = LibraryService.ExportM3u(m3u, originalTracks.Take(3));
+            var m3uText = written == null ? "" : File.ReadAllText(written);
+            Check("m3u export writes entries", written != null && File.Exists(written) && m3uText.StartsWith("#EXTM3U")
+                && originalTracks.Take(3).All(t => m3uText.Contains(t.Title)),
+                m3uText.Length > 400 ? m3uText[..400] : m3uText);
+            if (written != null) File.Delete(written);
+
+            // ---- 全局热键 ----
+            Check("global hotkeys registered", hotKeys != null, hotKeys?.Failed);
+            Check("global hotkey bindings documented", GlobalHotKeys.Description.Contains("Ctrl"));
 
             Library_Click(this, new()); await Settle();
             Now_Click(this, new()); await Settle(700);

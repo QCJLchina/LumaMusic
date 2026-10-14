@@ -51,8 +51,42 @@ def create(profile: pathlib.Path):
     db.execute('INSERT OR IGNORE INTO playlists VALUES(1,?)', ('夜晚的散步',))
     db.execute('INSERT OR IGNORE INTO playlist_tracks VALUES(1,?,0)', ('ui-0-0',))
     db.commit(); db.close()
+    create_cue_album(assets)
     (profile/'settings.json').write_text(json.dumps(dict(Online=False,Theme=1,Volume=0,LastTrack='ui-0-0',Queue=['ui-0-0','ui-1-0','ui-2-0'],CloseToTray=False,LastUpdateCheck='2026-09-07T00:00:00Z')),encoding='utf-8')
     print(profile)
+
+def create_cue_album(assets: pathlib.Path):
+    """一张整轨 WAV + 同名 .cue：走真实导入路径验证 cue 拆轨，而不是直接塞数据库行。"""
+    album = assets / 'cue-album'
+    album.mkdir(parents=True, exist_ok=True)
+    whole = album / '整轨.wav'
+    # 30 秒立体声静音，cue 在 5/15/25 秒切三首
+    with wave.open(str(whole), 'wb') as stream:
+        stream.setparams((2, 2, 48000, 0, 'NONE', 'not compressed'))
+        stream.writeframes(bytes(48000 * 4 * 30))
+    # GBK 编码：中文 cue 在国内极常见，必须能解码
+    cue = album / '整轨.cue'
+    text = '\r\n'.join([
+        'REM GENRE 测试流派',
+        'REM DATE 1997',
+        'REM ALBUM 整轨专辑',
+        'REM ALBUMARTIST 整轨乐队',
+        'FILE "整轨.wav" WAVE',
+        '  TRACK 01 AUDIO',
+        '    TITLE 第一首',
+        '    PERFORMER 整轨乐队',
+        '    INDEX 01 00:00:00',
+        '  TRACK 02 AUDIO',
+        '    TITLE 第二首',
+        '    PERFORMER 整轨乐队',
+        '    INDEX 00 00:04:74',
+        '    INDEX 01 00:05:00',
+        '  TRACK 03 AUDIO',
+        '    TITLE 第三首',
+        '    PERFORMER 整轨乐队',
+        '    INDEX 01 00:15:00',
+        ''])
+    cue.write_bytes(text.encode('gbk'))
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--profile',default='build/ui-test-profile')
