@@ -61,6 +61,10 @@ struct Engine {
     std::unique_ptr<Worker> worker;
     uint32_t sourceRate=0,channels=0,rate=0,sourceChannels=0,bits=0;
     double duration=0,offset=0,latency=0;
+    // cue 拆轨的播放上限（绝对秒）。<=0 表示整轨播放。
+    double limit=0;
+    // 上报给 UI 的坐标原点：cue 曲目要让进度条从 0 开始，所以记下播放起点而不是文件开头。
+    double origin=0;
     std::vector<uint8_t> ring=std::vector<uint8_t>(16*1024*1024);
     std::atomic<uint64_t> head{0},tail{0},played{0},underruns{0};
     std::atomic<bool> quit{false},ended{false},failed{false},playing{false};
@@ -94,10 +98,18 @@ struct Engine {
     DWORD pull(void* buffer,DWORD length){
         auto t=tail.load(std::memory_order_relaxed);auto h=head.load(std::memory_order_acquire);
         size_t n=std::min<size_t>(length,h-t);n-=n%frameSize();
+        // cue 曲目只放到 limit 为止：截断后按静音补齐，绝不越过下一首的起点。
+        // 截断不是欠载（欠载会拉高 underruns 计数、污染 UI 回归的断言），所以单独标记。
+        bool truncated=false;
+        if(limit>0){
+            double bytesPerSecond=(double)rate*frameSize()/(dsd&&dsdMode==2?8:1);
+            size_t budget=played.load()+(size_t)std::max(0.0,(limit-offset)*bytesPerSecond);
+            if(n>budget){n=budget-budget%frameSize();truncated=true;}
+        }
         auto first=std::min(n,ring.size()-(size_t)(t%ring.size()));memcpy(buffer,ring.data()+t%ring.size(),first);if(n>first)memcpy((uint8_t*)buffer+first,ring.data(),n-first);
         tail.store(t+n,std::memory_order_release);played+=n;
         if(n<length){
-            if(!ended&&!quit)underruns++;
+            if(!ended&&!quit&&!truncated)underruns++;
             if(dsd&&dsdMode==2)memset((uint8_t*)buffer+n,0x69,length-n);
             else if(dsd&&dsdMode==1){
                 // Derive marker continuation from last valid frame, including underrun boundaries.
@@ -202,16 +214,26 @@ struct Engine {
         if(failed)throw std::runtime_error(failure.empty()?"设备初始化失败":failure);
     }
     void resume(){activate();bool ok=asio?BASS_ASIO_Start(0,0):BASS_WASAPI_Start();if(!ok)throw std::runtime_error("音频设备启动失败");playing=true;}
-    double position()const{double bytesPerSecond=(double)rate*frameSize()/(dsd&&dsdMode==2?8:1);return std::clamp(offset+played.load()/bytesPerSecond-(playing?latency:0),0.0,duration);}
+    // cue 曲目的可播时长：limit 是绝对秒，<=0 时取整轨长度。
+    double playable()const{return limit>0?std::min(limit,duration):duration;}
+    // 进度条长度：cue 曲目只覆盖自己那一段，不是整轨长度。
+    double span()const{return playable()-origin;}
+    bool atLimit()const{
+        if(limit<=0)return false;
+        double bytesPerSecond=(double)rate*frameSize()/(dsd&&dsdMode==2?8:1);
+        return offset+played.load()/bytesPerSecond>=limit;
+    }
+    // position 相对播放起点上报，UI 才能把 cue 曲目的进度条当成 0→Duration。
+    double position()const{double bytesPerSecond=(double)rate*frameSize()/(dsd&&dsdMode==2?8:1);double raw=offset+played.load()/bytesPerSecond-(playing?latency:0);return std::clamp(raw-origin,0.0,span());}
 };
 static std::unique_ptr<Engine> engine;
 
 API int luma_init(const wchar_t* directory){std::lock_guard lock(gate);try{appDir=directory;SetDllDirectoryW(directory);BASS_SetConfig(BASS_CONFIG_UNICODE,TRUE);if(!BASS_Init(0,44100,0,nullptr,nullptr)&&BASS_ErrorGetCode()!=BASS_ERROR_ALREADY)throw std::runtime_error("BASS 初始化失败");for(auto name:{L"bassflac.dll",L"bassape.dll",L"bassalac.dll",L"bassopus.dll",L"basswv.dll"}){auto p=BASS_PluginLoad((appDir/name).c_str(),BASS_UNICODE);if(p)plugins.push_back(p);}initialized=true;return 1;}catch(const std::exception& e){errorText=e.what();return 0;}}
 API const char* luma_error(){std::lock_guard lock(gate);resultText=errorText;return resultText.c_str();}
 API const char* luma_devices(){std::lock_guard lock(gate);std::ostringstream o;o<<"[";bool comma=false;BASS_WASAPI_DEVICEINFO d{};for(int i=0;BASS_WASAPI_GetDeviceInfo(i,&d);++i){if(!(d.flags&BASS_DEVICE_ENABLED)||(d.flags&(BASS_DEVICE_INPUT|BASS_DEVICE_LOOPBACK)))continue;if(comma)o<<",";comma=true;o<<"{\"index\":"<<i<<",\"backend\":1,\"name\":"<<quote(d.name?d.name:"")<<",\"id\":"<<quote(d.id?d.id:"")<<",\"default\":"<<((d.flags&BASS_DEVICE_DEFAULT)?"true":"false")<<",\"channels\":"<<d.mixchans<<",\"rate\":"<<d.mixfreq<<"}";}BASS_ASIO_DEVICEINFO a{};for(int i=0;BASS_ASIO_GetDeviceInfo(i,&a);++i){if(comma)o<<",";comma=true;o<<"{\"index\":"<<i<<",\"backend\":2,\"name\":"<<quote(a.name?a.name:"")<<",\"id\":"<<quote(a.driver?a.driver:"")<<",\"default\":false,\"channels\":0,\"rate\":0}";}o<<"]";resultText=o.str();return resultText.c_str();}
-API int luma_open(const wchar_t* file,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,const int* map,float volume,double position){std::lock_guard lock(gate);try{engine.reset();auto next=std::make_unique<Engine>();next->file=file;next->track=track;next->backend=backend;next->device=device;next->dsdMode=mode;next->pcmRate=pcmRate;next->forceRate=forceRate;next->downmix=downmix!=0;next->volume=volume;if(map){for(int i=0;i<8;++i){next->mapping[i]=map[i];for(int j=0;j<i;++j)if(map[i]==map[j])throw std::runtime_error("通道映射不能重复");}}next->open(position);engine=std::move(next);engine->resume();errorText.clear();return 1;}catch(const std::exception& e){errorText=e.what();engine.reset();return 0;}}
+API int luma_open(const wchar_t* file,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,const int* map,float volume,double position,double limit){std::lock_guard lock(gate);try{engine.reset();auto next=std::make_unique<Engine>();next->file=file;next->track=track;next->backend=backend;next->device=device;next->dsdMode=mode;next->pcmRate=pcmRate;next->forceRate=forceRate;next->downmix=downmix!=0;next->volume=volume;next->limit=std::isfinite(limit)?limit:0;next->origin=next->limit>0?std::min(next->limit,std::max(0.0,position)):0;if(map){for(int i=0;i<8;++i){next->mapping[i]=map[i];for(int j=0;j<i;++j)if(map[i]==map[j])throw std::runtime_error("通道映射不能重复");}}next->open(position);engine=std::move(next);engine->resume();errorText.clear();return 1;}catch(const std::exception& e){errorText=e.what();engine.reset();return 0;}}
 API int luma_pause(int pause){std::lock_guard lock(gate);try{if(!engine)return 0;engine->activate();if(pause){if(engine->asio)BASS_ASIO_Stop();else BASS_WASAPI_Stop(FALSE);engine->playing=false;}else engine->resume();return 1;}catch(const std::exception&e){errorText=e.what();return 0;}}
 API void luma_stop(){std::lock_guard lock(gate);engine.reset();}
 API void luma_volume(float v){std::lock_guard lock(gate);if(engine)engine->volume=std::clamp(v,0.f,1.f);}
-API const char* luma_state(){std::lock_guard lock(gate);if(!engine){resultText="{}";return resultText.c_str();}auto&e=*engine;bool done=e.ended&&e.head==e.tail;std::ostringstream o;o<<"{\"playing\":"<<(e.playing?"true":"false")<<",\"ended\":"<<(done?"true":"false")<<",\"failed\":"<<(e.failed?"true":"false")<<",\"error\":"<<quote(e.failure)<<",\"position\":"<<e.position()<<",\"duration\":"<<e.duration<<",\"sourceRate\":"<<e.sourceRate<<",\"sourceChannels\":"<<e.sourceChannels<<",\"rate\":"<<e.rate<<",\"channels\":"<<e.channels<<",\"bits\":"<<e.bits<<",\"dsd\":"<<(e.dsd?"true":"false")<<",\"mode\":"<<e.dsdMode<<",\"backend\":"<<e.backend<<",\"underruns\":"<<e.underruns<<"}";resultText=o.str();return resultText.c_str();}
+API const char* luma_state(){std::lock_guard lock(gate);if(!engine){resultText="{}";return resultText.c_str();}auto&e=*engine;bool done=(e.ended&&e.head==e.tail)||e.atLimit();std::ostringstream o;o<<"{\"playing\":"<<(e.playing?"true":"false")<<",\"ended\":"<<(done?"true":"false")<<",\"failed\":"<<(e.failed?"true":"false")<<",\"error\":"<<quote(e.failure)<<",\"position\":"<<e.position()<<",\"duration\":"<<e.span()<<",\"sourceRate\":"<<e.sourceRate<<",\"sourceChannels\":"<<e.sourceChannels<<",\"rate\":"<<e.rate<<",\"channels\":"<<e.channels<<",\"bits\":"<<e.bits<<",\"dsd\":"<<(e.dsd?"true":"false")<<",\"mode\":"<<e.dsdMode<<",\"backend\":"<<e.backend<<",\"underruns\":"<<e.underruns<<"}";resultText=o.str();return resultText.c_str();}
 API void luma_shutdown(){std::lock_guard lock(gate);engine.reset();for(auto p:plugins)BASS_PluginFree(p);plugins.clear();BASS_Free();initialized=false;}

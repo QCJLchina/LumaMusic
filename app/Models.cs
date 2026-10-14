@@ -17,6 +17,14 @@ public class Track : INotifyPropertyChanged
     public int Bits {get;set;}
     public string Format {get;set;}="";
     public long Modified {get;set;}
+    // 曲目元数据：旧库缺失即 0/空串，无需 schema 迁移。碟号曲号决定专辑内排序。
+    public int DiscNumber {get;set;}
+    public int TrackNumber {get;set;}
+    public int Year {get;set;}
+    public string Genre {get;set;}="";
+    public string AlbumArtist {get;set;}="";
+    // cue 拆轨的起始秒；<=0 表示整轨播放（与 position 语义一致）。
+    public double CueIndex {get;set;}
     string cover=""; public string Cover {get=>cover;set{cover=value;OnChanged();}}
     // x:Bind 函数直接返回 ImageSource，绕开 XamlBindingHelper.ConvertValue——
     // 它对空字符串（甚至 null）都会抛 ArgumentException，且未处理异常会让整个应用崩溃。
@@ -27,6 +35,8 @@ public class Track : INotifyPropertyChanged
     public string Quality=>Format is "DSF" or "DFF" or "ISO"?$"DSD{SampleRate/44100} · {Channels}ch":$"{Format} · {SampleRate/1000d:0.#} kHz";
     public string Subtitle=>$"{Artist} · {Album}";
     public string AlbumKey=>$"{Album}\n{Artist}";
+    // 列表列头用的可点击排序键；AlbumKey 保持专辑优先浏览的既有语义不变。
+    public string YearText=>Year>0?Year.ToString():"";
     public event PropertyChangedEventHandler? PropertyChanged;
     void OnChanged([CallerMemberName]string? name=null)=>PropertyChanged?.Invoke(this,new(name));
 }
