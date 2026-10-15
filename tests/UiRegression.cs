@@ -102,7 +102,20 @@ public sealed partial class MainWindow
                 Library_Click(this, new()); await Settle();
                 Check($"library bounds {theme} {size}", Within(SearchBox) && Within(AlbumGrid) && Within(PlayButton) && Within(SeekSlider),
                     new { Root.ActualWidth, Root.ActualHeight, dpi = Root.XamlRoot.RasterizationScale, seek = SeekSlider.ActualWidth });
+                Check($"library selection matches library page {theme} {size}",
+                    Math.Abs(NavSelection.TransformToVisual(MainNavigation).TransformPoint(new()).Y-LibraryNav.TransformToVisual(MainNavigation).TransformPoint(new()).Y)<1);
                 Check($"compact policy {theme} {size}", (Root.ActualWidth < 1100) == (CompactVolume.Visibility == Visibility.Visible));
+                if(compactLayout){
+                    var addCenter=NewPlaylistButton.TransformToVisual(Root).TransformPoint(new(NewPlaylistButton.ActualWidth/2,0)).X;
+                    var navCenter=LibraryNav.TransformToVisual(Root).TransformPoint(new(LibraryNav.ActualWidth/2,0)).X;
+                    Check($"compact playlist add alignment {theme} {size}", Math.Abs(addCenter-navCenter)<1, new { addCenter, navCenter });
+                    Check($"compact playlist hover bounds match navigation {theme} {size}",
+                        Math.Abs(NewPlaylistButton.ActualWidth-LibraryNav.ActualWidth)<1 &&
+                        Math.Abs(NewPlaylistButton.ActualHeight-LibraryNav.ActualHeight)<1 &&
+                        NewPlaylistButton.CornerRadius.Equals(LibraryNav.CornerRadius) &&
+                        NewPlaylistButton.Padding.Equals(LibraryNav.Padding) &&
+                        ReferenceEquals(NewPlaylistButton.Style,LibraryNav.Style));
+                }
                 Now_Click(this, new()); await Settle();
                 Check($"now bounds {theme} {size}", Within(LargeCover) && Within(LyricsScroll) && Within(PlayButton));
                 Check($"immersive layout {theme} {size}", SidebarGlass.Visibility == Visibility.Collapsed && Grid.GetColumn(ContentHost) == 0 && Grid.GetColumnSpan(ContentHost) == 2 && SignalDetails.Visibility == Visibility.Collapsed);
@@ -282,6 +295,15 @@ public sealed partial class MainWindow
             await Play(cueTracks[1]); await Settle(900);
             Check("cue playback starts at its own index", lastState.Playing && lastState.Duration < 20 && !lastState.Failed,
                 new { duration = lastState.Duration, position = lastState.Position });
+            await SeekTo(3); await Settle(180);
+            Check("cue seek keeps duration and relative position", Math.Abs(lastState.Duration-10)<.01 && lastState.Position>=2.7 && lastState.Position<4,
+                new { lastState.Duration, lastState.Position });
+            await SeekTo(1); await Settle(180);
+            Check("cue backward seek keeps origin", Math.Abs(lastState.Duration-10)<.01 && lastState.Position>=.7 && lastState.Position<2,
+                new { lastState.Duration, lastState.Position });
+            await Play(cueTracks[1],3); await Settle(180);
+            Check("cue resume keeps full track duration", Math.Abs(lastState.Duration-10)<.01 && lastState.Position>=2.7 && lastState.Position<4,
+                new { lastState.Duration, lastState.Position });
             await Play(cueTracks[0]); await Settle(900);
             Check("cue first track stops at its own end", lastState.Playing && lastState.Duration < 10 && !lastState.Failed,
                 new { duration = lastState.Duration, position = lastState.Position });
@@ -305,21 +327,25 @@ public sealed partial class MainWindow
             var rgGain = rgExpected.RootElement.GetProperty("trackGain").GetDouble();
             var rgFile = Path.Combine(Environment.CurrentDirectory, "build", "ui-fixtures", "replaygain-sample.wav");
             await Import([rgFile]);
-            var rgTrack = tracks.FirstOrDefault(t => t.Path.Equals(rgFile, StringComparison.OrdinalIgnoreCase));
-            Check("replaygain tag parsed from file", rgTrack != null && Math.Abs(rgTrack.ReplayGainDb - rgGain) < .01 && rgTrack.GainSource == "track",
-                new { found = rgTrack?.ReplayGainDb, expected = rgGain, source = rgTrack?.GainSource });
+            var rgTrack = tracks.FirstOrDefault(t => t.Path.Equals(rgFile, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException("replaygain sample was not imported");
+            Check("replaygain tag parsed from file", Math.Abs(rgTrack.ReplayGainDb - rgGain) < .01 && rgTrack.GainSource == "track",
+                new { found = rgTrack.ReplayGainDb, expected = rgGain, source = rgTrack.GainSource });
             // 关闭时增益必须是 1（不改变任何音频数据）。
             var profileNoGain = prefs.Profile;
             profileNoGain.ReplayGain = 0;
-            Check("replaygain off yields unity gain", Math.Abs(GainFor(rgTrack, profileNoGain) - 1f) < 1e-6);
+            Check("replaygain off yields unity gain", Math.Abs(ReplayGainTag.LinearGain(rgTrack, profileNoGain.ReplayGain) - 1f) < 1e-6);
             profileNoGain.ReplayGain = 2;
             Check("replaygain dB converts to linear gain",
-                Math.Abs(GainFor(rgTrack, profileNoGain) - Math.Pow(10, rgGain / 20)) < 1e-4,
-                GainFor(rgTrack, profileNoGain));
+                Math.Abs(ReplayGainTag.LinearGain(rgTrack, profileNoGain.ReplayGain) - Math.Pow(10, rgGain / 20)) < 1e-4,
+                ReplayGainTag.LinearGain(rgTrack, profileNoGain.ReplayGain));
             profileNoGain.ReplayGain = 1;
-            // 只有专辑标签的文件在"专辑增益"模式下不做任何修正（增益为 1.0），而不是被静音。
-            Check("album mode without album tag leaves gain at unity", Math.Abs(GainFor(rgTrack, profileNoGain) - 1f) < 1e-6,
-                GainFor(rgTrack, profileNoGain));
+            // 只有曲目标签的文件在"专辑增益"模式下不做任何修正（增益为 1.0），而不是被静音。
+            Check("album mode without album tag leaves gain at unity", Math.Abs(ReplayGainTag.LinearGain(rgTrack, profileNoGain.ReplayGain) - 1f) < 1e-6,
+                ReplayGainTag.LinearGain(rgTrack, profileNoGain.ReplayGain));
+            // 导入只存标签原始值，音乐库里的曲目增益不该被专辑值合并覆盖。
+            Check("import keeps raw replaygain values", rgTrack.ReplayGainDb != 0 && rgTrack.ReplayGainAlbumDb == 0,
+                new { track = rgTrack.ReplayGainDb, album = rgTrack.ReplayGainAlbumDb });
             // 播放时引擎收到的确实是这个倍率（真出声验证由 audio_smoke 覆盖）。
             prefs.Profile.ReplayGain = 2;
             await Play(rgTrack); await Settle(900);
@@ -342,6 +368,18 @@ public sealed partial class MainWindow
             PageTitle.Text = ((Playlist)nav.Tag).Name; showAlbums = false; showArtists = false;
             ShowLibrary(); Filter(); await Settle();
             Check("playlist view follows stored order", visible.Select(t => t.Id).SequenceEqual(library.PlaylistTracks(pl.Id)));
+            // 搜索过滤下拖拽只会提交可见子集：没显示的曲目必须按原相对位置保留，不能被丢掉。
+            var fullOrder = library.PlaylistTracks(pl.Id).ToList();
+            SearchBox.Text = tracks.First(t => t.Id == fullOrder[^1]).Title; Filter();
+            var visibleIds = visible.Select(t => t.Id).ToList();
+            Check("search narrows playlist before reorder", visibleIds.Count > 0 && visibleIds.Count < fullOrder.Count, visibleIds);
+            var submitted = visibleIds.AsEnumerable().Reverse().ToList();
+            library.ReorderPlaylist(pl.Id, submitted);
+            var expectedOrder = submitted.Concat(fullOrder.Where(t => !submitted.Contains(t))).ToList();
+            Check("playlist reorder keeps tracks hidden by search", library.PlaylistTracks(pl.Id).SequenceEqual(expectedOrder),
+                library.PlaylistTracks(pl.Id));
+            SearchBox.Text = ""; Filter();
+            Check("playlist returns to full order after search", visible.Select(t => t.Id).SequenceEqual(expectedOrder));
             library.RenamePlaylist(pl.Id, "改名后的列表");
             Check("playlist rename", library.Playlists().First(p => p.Id == pl.Id).Name == "改名后的列表");
             var m3u = Path.Combine(Path.GetTempPath(), "luma-regression.m3u");

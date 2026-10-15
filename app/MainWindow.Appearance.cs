@@ -25,7 +25,6 @@ public sealed partial class MainWindow
     int effectiveVisualQuality=2;
     bool ReduceMotion => reduceMotion || prefs.ReducedMotion;
     partial void StartUiRegression();
-    int selectedNavigation = -1;
     (bool contrast, bool effects, bool animations, bool saving) lastSystemAppearance;
     GlassSurface[] GlassSurfaces => [SidebarGlass, PlayerGlass, QueuePanel];
 
@@ -144,8 +143,16 @@ public sealed partial class MainWindow
         compactLayout = Root.ActualWidth < 1100;
         SidebarColumn.Width = new(nowVisible ? 0 : compactLayout ? 76 : 208);
         Workspace.ColumnSpacing = nowVisible ? 0 : compactLayout ? 16 : 28;
-        foreach (var label in new FrameworkElement[] { LibraryNavLabel, NowNavLabel, FavoritesNavLabel, ImportNavLabel, SettingsNavLabel, PlaylistHeading, LibraryCount })
+        foreach (var label in new FrameworkElement[] { LibraryNavLabel, NowNavLabel, FavoritesNavLabel, ImportNavLabel, SettingsNavLabel, PlaylistHeading, LibraryCount, NewPlaylistLabel })
             label.Visibility = compactLayout ? Visibility.Collapsed : Visibility.Visible;
+        PlaylistHeader.Visibility = compactLayout ? Visibility.Collapsed : Visibility.Visible;
+        PlaylistHeader.Margin = new Thickness(6, 20, 0, 8);
+        EnsureNewPlaylistPlacement();
+        NewPlaylistButton.Style = (Style)Application.Current.Resources[compactLayout ? "NavButton" : "QuietButton"];
+        NewPlaylistButton.HorizontalAlignment = compactLayout ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
+        NewPlaylistButton.Padding = compactLayout ? LibraryNav.Padding : new Thickness(5);
+        NewPlaylistButton.Height = compactLayout ? 48 : double.NaN;
+        NewPlaylistIcon.FontSize = compactLayout ? 17 : 12;
         PlayerInfoColumn.Width = new(compactLayout ? 180 : 250);
         PlayerToolsColumn.Width = new(compactLayout ? 120 : 190);
         PlayerLayout.ColumnSpacing = compactLayout ? 12 : 20;
@@ -158,6 +165,23 @@ public sealed partial class MainWindow
         foreach (var button in PlaylistNav.Children.OfType<Button>())
             if (button.Tag is Playlist playlist) ConfigurePlaylistButton(button, playlist);
         foreach (var surface in GlassSurfaces) surface.UpdateLens();
+    }
+    void EnsureNewPlaylistPlacement()
+    {
+        if (compactLayout)
+        {
+            if (NewPlaylistButton.Parent != PrimaryNavStack)
+            {
+                if (NewPlaylistButton.Parent is Panel oldHost) oldHost.Children.Remove(NewPlaylistButton);
+                PrimaryNavStack.Children.Add(NewPlaylistButton);
+            }
+            return;
+        }
+        if (NewPlaylistButton.Parent != PlaylistHeader)
+        {
+            if (NewPlaylistButton.Parent is Panel oldHost) oldHost.Children.Remove(NewPlaylistButton);
+            PlaylistHeader.Children.Add(NewPlaylistButton);
+        }
     }
     void ConfigurePlaylistButton(Button button, Playlist playlist)
     {
@@ -172,21 +196,18 @@ public sealed partial class MainWindow
     {
         int index = nowVisible ? 1 : favoritesOnly ? 2 : playlistFilter != null ? -1 : 0;
         NavSelection.Visibility = index < 0 ? Visibility.Collapsed : Visibility.Visible;
-        if (index >= 0 && index != selectedNavigation)
+        if (index >= 0)
         {
+            // 侧栏隐藏时的合成动画可能保留旧位置；用实际布局位置同步选中背景。
+            MainNavigation.UpdateLayout();
+            var button = new[] { LibraryNav, NowNav, FavoritesNav }[index];
+            var top = button.TransformToVisual(MainNavigation).TransformPoint(new()).Y;
             ElementCompositionPreview.SetIsTranslationEnabled(NavSelection, true);
             var visual = ElementCompositionPreview.GetElementVisual(NavSelection);
-            var target = new Vector3(0, index * 52, 0);
             visual.StopAnimation("Translation");
-            if (ReduceMotion || selectedNavigation < 0) visual.Properties.InsertVector3("Translation", target);
-            else
-            {
-                var animation = visual.Compositor.CreateSpringVector3Animation();
-                animation.FinalValue = target; animation.DampingRatio=1; animation.Period=TimeSpan.FromSeconds(.45);
-                visual.StartAnimation("Translation", animation);
-            }
+            visual.Properties.InsertVector3("Translation", Vector3.Zero);
+            NavSelection.Margin = new Thickness(0, top, 0, 0);
         }
-        selectedNavigation = index;
         foreach (var button in PlaylistNav.Children.OfType<Button>())
             if (button.Tag is Playlist playlist) ConfigurePlaylistButton(button, playlist);
     }

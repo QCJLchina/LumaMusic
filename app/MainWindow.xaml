@@ -28,7 +28,7 @@
           <StackPanel>
             <Grid x:Name="MainNavigation">
               <Border Height="{Binding Height, ElementName=LibraryNav}" CornerRadius="{Binding CornerRadius, ElementName=LibraryNav}" Background="{ThemeResource ButtonFillStrong}" VerticalAlignment="Top" IsHitTestVisible="False" x:Name="NavSelection" />
-              <StackPanel Spacing="4">
+              <StackPanel Spacing="4" x:Name="PrimaryNavStack">
                 <Button x:Name="LibraryNav" Style="{StaticResource NavButton}" Click="Library_Click" ToolTipService.ToolTip="音乐库" AutomationProperties.Name="音乐库">
                   <StackPanel Orientation="Horizontal" Spacing="15">
                     <FontIcon Glyph="" FontSize="17" Foreground="{ThemeResource Accent}" />
@@ -49,12 +49,15 @@
                 </Button>
               </StackPanel>
             </Grid>
-            <Grid Margin="6,20,0,8">
+            <Grid x:Name="PlaylistHeader" Margin="6,20,0,8">
               <TextBlock Text="播放列表" FontSize="12" Foreground="{ThemeResource TextSecondary}" VerticalAlignment="Center" x:Name="PlaylistHeading" />
-              <Button HorizontalAlignment="Right" Style="{StaticResource QuietButton}" Padding="5" Click="NewPlaylist_Click" ToolTipService.ToolTip="新建播放列表" AutomationProperties.Name="新建播放列表">
-                <FontIcon Glyph="" FontSize="12" />
-              </Button>
             </Grid>
+            <Button x:Name="NewPlaylistButton" HorizontalAlignment="Right" Style="{StaticResource QuietButton}" Padding="5" Click="NewPlaylist_Click" ToolTipService.ToolTip="新建播放列表" AutomationProperties.Name="新建播放列表">
+              <StackPanel Orientation="Horizontal" Spacing="15">
+                <FontIcon x:Name="NewPlaylistIcon" Glyph="" FontSize="12" />
+                <TextBlock Text="新建播放列表" x:Name="NewPlaylistLabel" />
+              </StackPanel>
+            </Button>
           </StackPanel>
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel x:Name="PlaylistNav" />
