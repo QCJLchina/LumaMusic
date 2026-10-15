@@ -21,8 +21,19 @@ public static class ReplayGainTag
     // 歌曲增益缺失时退回专辑增益——只打过一种标签的文件也能吃到修正。
     public static double Select(Values values,int mode)
     {
+        if(mode==0)return 0;
         if(mode==1)return values.AlbumGainDb;
-        return mode==2?values.TrackGainDb:(values.TrackGainDb!=0?values.TrackGainDb:values.AlbumGainDb);
+        return values.TrackGainDb!=0?values.TrackGainDb:values.AlbumGainDb;
+    }
+
+    /// <summary>把曲目上存的字段还原成标签值，供 Select / PeakFor 复用同一套规则。</summary>
+    public static Values From(Track track)=>new(track.ReplayGainDb,track.ReplayGainAlbumDb,track.ReplayGainPeak,track.ReplayGainPeak);
+
+    /// <summary>播放时折进软件音量的线性倍率。模式关闭或没有标签时是 1（不改变音频数据）。</summary>
+    public static float LinearGain(Track track,int mode)
+    {
+        double db=Select(From(track),mode);
+        return db==0?1f:(float)Math.Pow(10,db/20);
     }
 
     /// <summary>选中增益对应的真峰值（dBFS，≤0），用于提示增益后可能削顶。</summary>

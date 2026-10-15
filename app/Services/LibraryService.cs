@@ -101,15 +101,15 @@ public class LibraryService
                 if(tag.Properties.AudioChannels>0)t.Channels=tag.Properties.AudioChannels;
             }
             t.Cover=cover;}
-            // ReplayGain 只从标签读（不做音频分析）。曲目与专辑增益分开存，
-            // 具体用哪个由播放时的设置决定；cue 拆出的曲目回退到专辑增益。
+            // ReplayGain 只从标签读（不做音频分析），这里只存标签原始值。
+            // 用曲目还是专辑增益由播放时的设置决定，见 ReplayGainTag.Select。
             var gains=ReplayGainTag.Read(tag.Tag);
             if(gains.TrackGainDb!=0||gains.AlbumGainDb!=0)
                 foreach(var t in tracks){
-                    var trackGain=t.FromCue?0:gains.TrackGainDb;
-                    t.ReplayGainDb=trackGain!=0?trackGain:gains.AlbumGainDb;
+                    // cue 虚拟轨是整轨的一部分，整轨的曲目增益对它没有意义；专辑增益仍然适用。
+                    t.ReplayGainDb=t.FromCue?0:gains.TrackGainDb;
                     t.ReplayGainAlbumDb=gains.AlbumGainDb;
-                    t.GainSource=trackGain!=0?"track":gains.AlbumGainDb!=0?"album":"";
+                    t.GainSource=t.ReplayGainDb!=0?"track":gains.AlbumGainDb!=0?"album":"";
                     t.ReplayGainPeak=Math.Max(gains.TrackPeak,gains.AlbumPeak);
                 }
         }catch(Exception e){if(format is not ("DSF" or "DFF" or "ISO"))AppPaths.Log($"Tags: {e.Message}");}

@@ -370,17 +370,10 @@ public sealed partial class MainWindow : Window
     // cue 拆出的曲目 position 是整轨内绝对秒，limit 是本曲终点。首曲起点为 0，靠 FromCue 而不是 CueIndex 判断要不要截断。
     static double CueStart(Track track)=>Math.Max(0,track.CueIndex);
     static double CueLimit(Track track)=>track.FromCue?Math.Max(track.CueIndex,track.CueIndex+track.Duration):0;
-    // ReplayGain 折进软件音量：dB → 线性倍率。模式在播放时才生效，
-    // 所以切换设置后立刻改变，不需要重新导入曲库。
+    // ReplayGain 折进软件音量：dB → 线性倍率，规则集中在 ReplayGainTag（导入与播放共用一套）。
+    // 模式在播放时才生效，所以切换设置后立刻改变，不需要重新导入曲库。
     // DSD 透传/原生路径不适用（引擎里不乘这些样本），位完美用户自行关闭即可。
-    static float GainFor(Track track,DeviceProfile profile)
-    {
-        if(profile.ReplayGain==0)return 1f;
-        double db=profile.ReplayGain==1?track.ReplayGainAlbumDb:track.ReplayGainDb;
-        // 选中的那一项缺失时不做修正（增益 1.0），不能因为"没标签"就静音。
-        if(db==0)return 1f;
-        return (float)Math.Pow(10,db/20);
-    }
+    static float GainFor(Track track,DeviceProfile profile)=>ReplayGainTag.LinearGain(track,profile.ReplayGain);
     async Task Play(Track track,double position=0)
     {
         if(audio==null){Toast("音频引擎不可用",error:true);return;}if(Device==null){await Settings();return;}
@@ -502,8 +495,11 @@ async Task SeekTo(double position)
     void TrackList_ReorderCompleted(ListViewBase sender,DragItemsCompletedEventArgs args)
     {
         if(playlistFilter is not long id||args.Items.FirstOrDefault() is not Track)return;
+        // 搜索过滤时拖拽只提交可见子集，没显示的曲目会被排到后面，这里明确告知用户。
+        int fullCount=library.PlaylistTracks(id).Count;
         library.ReorderPlaylist(id,visible.Select(t=>t.Id).ToList());
-        Filter();Toast("播放列表顺序已更新");
+        Filter();
+        Toast("播放列表顺序已更新",fullCount>visible.Count?"未匹配搜索的歌曲仍保留在列表后面":"");
     }
     void TrackList_SelectionChanged(object sender,SelectionChangedEventArgs e){if(multiSelecting)UpdateSelectedCount();}
     void UpdateSelectedCount()=>SelectedCount.Text=$"已选择 {TrackList.SelectedItems.Count:N0} 首";
