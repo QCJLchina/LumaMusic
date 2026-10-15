@@ -63,7 +63,7 @@ struct Engine {
     double duration=0,offset=0,latency=0;
     // cue 拆轨的播放上限（绝对秒）。<=0 表示整轨播放。
     double limit=0;
-    // 上报给 UI 的坐标原点：cue 曲目要让进度条从 0 开始，所以记下播放起点而不是文件开头。
+    // cue 曲目的固定起点，与续播/定位后的解码位置 offset 分开保存。
     double origin=0;
     std::vector<uint8_t> ring=std::vector<uint8_t>(16*1024*1024);
     std::atomic<uint64_t> head{0},tail{0},played{0},underruns{0};
@@ -108,8 +108,11 @@ struct Engine {
         bool truncated=false;
         if(limit>0){
             double bytesPerSecond=(double)rate*frameSize()/(dsd&&dsdMode==2?8:1);
-            size_t budget=played.load()+(size_t)std::max(0.0,(limit-offset)*bytesPerSecond);
-            if(n>budget){n=budget-budget%frameSize();truncated=true;}
+            uint64_t total=(uint64_t)std::llround(std::max(0.0,(playable()-offset)*bytesPerSecond)/frameSize())*frameSize();
+            auto consumed=played.load();
+            uint64_t budget=consumed<total?total-consumed:0;
+            if(budget<length)truncated=true;
+            if(n>budget)n=(size_t)budget;
         }
         auto first=std::min(n,ring.size()-(size_t)(t%ring.size()));memcpy(buffer,ring.data()+t%ring.size(),first);if(n>first)memcpy((uint8_t*)buffer+first,ring.data(),n-first);
         tail.store(t+n,std::memory_order_release);played+=n;
@@ -226,7 +229,7 @@ struct Engine {
     void seek(double target){
         if(!std::isfinite(target))throw std::runtime_error("无效的播放位置");
         double span=playable();
-        target=std::clamp(target,0.0,std::max(0.0,span-.02));
+        target=std::clamp(target,origin,std::max(origin,span-.02));
         if(quit||failed)throw std::runtime_error("播放已停止，无法定位");
         quit=true;
         if(worker)worker->cancel();
@@ -237,7 +240,6 @@ struct Engine {
         dopMarker=false;
         quit=false;
         offset=target;
-        if(limit>0)origin=std::min(limit,target);
         if(dsd){
             // DSD 管道不可 seek：只能重启解码工作进程从目标位置重扫（DST 会比较慢）。
             worker=std::make_unique<Worker>();worker->start(file,track,dsdMode==0,pcmRate,target);
@@ -259,7 +261,8 @@ struct Engine {
     bool atLimit()const{
         if(limit<=0)return false;
         double bytesPerSecond=(double)rate*frameSize()/(dsd&&dsdMode==2?8:1);
-        return offset+played.load()/bytesPerSecond>=limit;
+        uint64_t total=(uint64_t)std::llround(std::max(0.0,(playable()-offset)*bytesPerSecond)/frameSize())*frameSize();
+        return played.load()>=total;
     }
     // position 相对播放起点上报，UI 才能把 cue 曲目的进度条当成 0→Duration。
     double position()const{double bytesPerSecond=(double)rate*frameSize()/(dsd&&dsdMode==2?8:1);double raw=offset+played.load()/bytesPerSecond-(playing?latency:0);return std::clamp(raw-origin,0.0,span());}
@@ -269,7 +272,7 @@ static std::unique_ptr<Engine> engine;
 API int luma_init(const wchar_t* directory){std::lock_guard lock(gate);try{appDir=directory;SetDllDirectoryW(directory);BASS_SetConfig(BASS_CONFIG_UNICODE,TRUE);if(!BASS_Init(0,44100,0,nullptr,nullptr)&&BASS_ErrorGetCode()!=BASS_ERROR_ALREADY)throw std::runtime_error("BASS 初始化失败");for(auto name:{L"bassflac.dll",L"bassape.dll",L"bassalac.dll",L"bassopus.dll",L"basswv.dll"}){auto p=BASS_PluginLoad((appDir/name).c_str(),BASS_UNICODE);if(p)plugins.push_back(p);}initialized=true;return 1;}catch(const std::exception& e){errorText=e.what();return 0;}}
 API const char* luma_error(){std::lock_guard lock(gate);resultText=errorText;return resultText.c_str();}
 API const char* luma_devices(){std::lock_guard lock(gate);std::ostringstream o;o<<"[";bool comma=false;BASS_WASAPI_DEVICEINFO d{};for(int i=0;BASS_WASAPI_GetDeviceInfo(i,&d);++i){if(!(d.flags&BASS_DEVICE_ENABLED)||(d.flags&(BASS_DEVICE_INPUT|BASS_DEVICE_LOOPBACK)))continue;if(comma)o<<",";comma=true;o<<"{\"index\":"<<i<<",\"backend\":1,\"name\":"<<quote(d.name?d.name:"")<<",\"id\":"<<quote(d.id?d.id:"")<<",\"default\":"<<((d.flags&BASS_DEVICE_DEFAULT)?"true":"false")<<",\"channels\":"<<d.mixchans<<",\"rate\":"<<d.mixfreq<<"}";}BASS_ASIO_DEVICEINFO a{};for(int i=0;BASS_ASIO_GetDeviceInfo(i,&a);++i){if(comma)o<<",";comma=true;o<<"{\"index\":"<<i<<",\"backend\":2,\"name\":"<<quote(a.name?a.name:"")<<",\"id\":"<<quote(a.driver?a.driver:"")<<",\"default\":false,\"channels\":0,\"rate\":0}";}o<<"]";resultText=o.str();return resultText.c_str();}
-API int luma_open(const wchar_t* file,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,const int* map,float volume,double position,double limit,float gainLinear){std::lock_guard lock(gate);try{engine.reset();auto next=std::make_unique<Engine>();next->file=file;next->track=track;next->backend=backend;next->device=device;next->dsdMode=mode;next->pcmRate=pcmRate;next->forceRate=forceRate;next->downmix=downmix!=0;next->volume=volume;next->gainLinear=(std::isfinite(gainLinear)&&gainLinear>0)?std::clamp(gainLinear,0.01f,4.f):1.f;next->limit=std::isfinite(limit)?limit:0;next->origin=next->limit>0?std::min(next->limit,std::max(0.0,position)):0;if(map){for(int i=0;i<8;++i){next->mapping[i]=map[i];for(int j=0;j<i;++j)if(map[i]==map[j])throw std::runtime_error("通道映射不能重复");}}next->open(position);engine=std::move(next);engine->resume();errorText.clear();return 1;}catch(const std::exception& e){errorText=e.what();engine.reset();return 0;}}
+API int luma_open(const wchar_t* file,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,const int* map,float volume,double position,double limit,float gainLinear,double cueStart){std::lock_guard lock(gate);try{engine.reset();auto next=std::make_unique<Engine>();next->file=file;next->track=track;next->backend=backend;next->device=device;next->dsdMode=mode;next->pcmRate=pcmRate;next->forceRate=forceRate;next->downmix=downmix!=0;next->volume=volume;next->gainLinear=(std::isfinite(gainLinear)&&gainLinear>0)?std::clamp(gainLinear,0.01f,4.f):1.f;next->limit=std::isfinite(limit)?limit:0;next->origin=next->limit>0&&std::isfinite(cueStart)?std::clamp(cueStart,0.0,next->limit):0;if(map){for(int i=0;i<8;++i){next->mapping[i]=map[i];for(int j=0;j<i;++j)if(map[i]==map[j])throw std::runtime_error("通道映射不能重复");}}next->open(position);engine=std::move(next);engine->resume();errorText.clear();return 1;}catch(const std::exception& e){errorText=e.what();engine.reset();return 0;}}
 API int luma_pause(int pause){std::lock_guard lock(gate);try{if(!engine)return 0;engine->activate();if(pause){if(engine->asio)BASS_ASIO_Stop();else BASS_WASAPI_Stop(FALSE);engine->playing=false;}else engine->resume();return 1;}catch(const std::exception&e){errorText=e.what();return 0;}}
 // 真 seek：保留已取得的输出设备（含独占句柄），只重建解码器。
 // 暂停状态下也能定位，播放状态保持不变。

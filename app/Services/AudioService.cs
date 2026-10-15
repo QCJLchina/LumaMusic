@@ -8,7 +8,7 @@ public sealed class AudioService : IDisposable
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern IntPtr luma_devices();
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern IntPtr luma_error();
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern IntPtr luma_state();
-    [DllImport(Dll,CharSet=CharSet.Unicode,CallingConvention=CallingConvention.Cdecl)]static extern int luma_open(string path,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,int[] map,float volume,double position,double limit,float gainLinear);
+    [DllImport(Dll,CharSet=CharSet.Unicode,CallingConvention=CallingConvention.Cdecl)]static extern int luma_open(string path,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,int[] map,float volume,double position,double limit,float gainLinear,double cueStart);
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern int luma_pause(int pause);
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern int luma_seek(double position);
     [DllImport(Dll,CallingConvention=CallingConvention.Cdecl)]static extern void luma_stop();
@@ -34,7 +34,7 @@ public sealed class AudioService : IDisposable
                 FlexAsioConfig.LastWarning=dsdMode==1?"FlexASIO 不支持原生 DSD，已自动改用 DoP 透传。":"FlexASIO 不支持原生 DSD，已自动转为 PCM 输出。";
             }
             async Task Start(){
-                await Task.Run(()=>{if(luma_open(track.Path,track.Subsong,profile.Backend,device.Index,dsdMode,profile.PcmRate,profile.ForceRate,profile.Downmix?1:0,profile.Mapping,volume,position,limit,gain)==0)throw new InvalidOperationException(Error());});
+                await Task.Run(()=>{if(luma_open(track.Path,track.Subsong,profile.Backend,device.Index,dsdMode,profile.PcmRate,profile.ForceRate,profile.Downmix?1:0,profile.Mapping,volume,position,limit,gain,Math.Max(0,track.CueIndex))==0)throw new InvalidOperationException(Error());});
             }
             if(profile.Backend==2&&device.Name==AsioSetup.DriverName)
             {

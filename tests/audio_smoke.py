@@ -45,7 +45,7 @@ with wave.open(str(file),'wb') as w:w.setparams((2,2,48000,0,'NONE','not compres
 os.add_dll_directory(str(binary));lib=C.CDLL(str(binary/'LumaAudio.dll'))
 lib.luma_init.argtypes=[C.c_wchar_p];lib.luma_init.restype=C.c_int
 lib.luma_devices.restype=C.c_char_p;lib.luma_state.restype=C.c_char_p;lib.luma_error.restype=C.c_char_p
-lib.luma_open.argtypes=[C.c_wchar_p]+[C.c_int]*7+[C.POINTER(C.c_int),C.c_float,C.c_double,C.c_double,C.c_float]
+lib.luma_open.argtypes=[C.c_wchar_p]+[C.c_int]*7+[C.POINTER(C.c_int),C.c_float,C.c_double,C.c_double,C.c_float,C.c_double]
 lib.luma_open.restype=C.c_int
 assert lib.luma_init(str(binary)),lib.luma_error()
 devices=json.loads(lib.luma_devices());print('Output devices:',[(d['name'],d['backend']) for d in devices],flush=True)
@@ -53,13 +53,13 @@ device=next((d for d in devices if d['default']),None)
 if device:
     mapping=(C.c_int*8)(*range(8))
     for backend in [0,1]:
-        result=lib.luma_open(str(file),1,backend,device['index'],0,176400,48000,0,mapping,0.,0.,0.,1.)
+        result=lib.luma_open(str(file),1,backend,device['index'],0,176400,48000,0,mapping,0.,0.,0.,1.,0.)
         if not result:print('HARDWARE UNAVAILABLE',backend,lib.luma_error().decode('utf-8'),flush=True);continue
         time.sleep(.35);state=json.loads(lib.luma_state());assert state['position']>0 and not state['failed'],state
         lib.luma_pause(1);lib.luma_pause(0);lib.luma_stop();print('PASS real silent output',backend,state['rate'],flush=True)
         # cue 拆轨：origin=0.5 起点、limit=0.9 终点，进度条必须只覆盖 0.4 秒这一段，
         # ended 自己变 true，且欠载计数不能被截断污染。
-        result=lib.luma_open(str(file),1,backend,device['index'],0,176400,48000,0,mapping,0.,0.5,0.9,1.)
+        result=lib.luma_open(str(file),1,backend,device['index'],0,176400,48000,0,mapping,0.,0.5,0.9,1.,0.5)
         if result:
             state=json.loads(lib.luma_state());assert abs(state['duration']-0.4)<1e-6,state
             for _ in range(40):
@@ -71,7 +71,7 @@ if device:
             lib.luma_stop();print('PASS cue limit truncates and reports ended',flush=True)
         else:print('HARDWARE UNAVAILABLE cue limit',backend,lib.luma_error().decode('utf-8'),flush=True)
         # ReplayGain：引擎必须如实回报收到的增益，且不改变采样率/声道（不重采样）。
-        result=lib.luma_open(str(file),1,backend,device['index'],0,176400,48000,0,mapping,0.,0.,0.,0.5)
+        result=lib.luma_open(str(file),1,backend,device['index'],0,176400,48000,0,mapping,0.,0.,0.,0.5,0.)
         if result:
             state=json.loads(lib.luma_state())
             assert abs(state['gain']-0.5)<1e-6,state

@@ -14,3 +14,5 @@ foreach ($dependency in @('bass','bassasio','basswasapi','bassmix','bassflac','b
 }
 & build/native-bin/LumaNativeTests.exe
 if ($LASTEXITCODE) { throw 'Native tests failed' }
+& build/native-bin/LumaEngineTests.exe
+if ($LASTEXITCODE) { throw 'Engine callback tests failed' }
