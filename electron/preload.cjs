@@ -386,4 +386,14 @@ contextBridge.exposeInMainWorld('electron', {
             return () => ipcRenderer.removeListener('folia-mods:secret-changed', listener);
         },
     },
+    lumaAudio: {
+        isAvailable: () => ipcRenderer.invoke("luma-audio-is-available"),
+        getDevices: () => ipcRenderer.invoke("luma-audio-get-devices"),
+        open: (params) => ipcRenderer.invoke("luma-audio-open", params),
+        pause: (pauseVal) => ipcRenderer.invoke("luma-audio-pause", pauseVal),
+        seek: (position) => ipcRenderer.invoke("luma-audio-seek", position),
+        stop: () => ipcRenderer.invoke("luma-audio-stop"),
+        setVolume: (volume) => ipcRenderer.invoke("luma-audio-set-volume", volume),
+        getState: () => ipcRenderer.invoke("luma-audio-get-state"),
+    },
 });

@@ -2016,6 +2016,9 @@ export default function App() {
         if (seekDuringTransitionRef.current(time)) {
             return;
         }
+        if (typeof window !== 'undefined' && window.electron?.lumaAudio) {
+            void window.electron.lumaAudio.seek(time);
+        }
         if (audioRef.current) {
             audioRef.current.currentTime = time;
             if (audioRef.current.paused) {

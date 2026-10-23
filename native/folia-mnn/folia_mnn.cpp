@@ -155,7 +155,7 @@ FOLIA_EXPORT const char* folia_mnn_isa() { return folia_dconv_isa(); }
  * which includes MNN's pool. A no-op on a machine with one efficiency class, and everywhere but Windows.
  */
 FOLIA_EXPORT int folia_mnn_prefer_fast_cores() {
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(__MINGW32__)
     HANDLE process = GetCurrentProcess();
     ULONG size = 0;
     // The first call is the size query and reports failure by design.

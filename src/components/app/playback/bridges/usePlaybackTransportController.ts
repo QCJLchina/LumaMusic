@@ -153,6 +153,9 @@ export function usePlaybackTransportController({
             ? playbackFade.prepareFadeIn()
             : null;
         try {
+            if (typeof window !== 'undefined' && window.electron?.lumaAudio) {
+                void window.electron.lumaAudio.pause(false);
+            }
             await audio.play();
             if (!isCurrent()) { playbackFade.abortFadeIn(fadeToken); return; }
             playbackFade.runFadeIn(fadeToken);
@@ -237,6 +240,9 @@ export function usePlaybackTransportController({
             // new song has set its play intent, so it is marked and ignored by the pause handler.
             if (reason === 'flushed' && !audioRef.current.paused && !audioRef.current.ended) {
                 markProgrammaticPause(audioRef.current);
+            }
+            if (typeof window !== 'undefined' && window.electron?.lumaAudio) {
+                void window.electron.lumaAudio.pause(true);
             }
             audioRef.current.pause();
             syncOutputGain(getTargetPlaybackVolume(), 0);

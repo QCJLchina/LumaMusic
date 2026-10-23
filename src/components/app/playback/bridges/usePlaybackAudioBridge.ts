@@ -17,6 +17,8 @@ import { setPlayerState } from '../../../../stores/usePlaybackStore';
 import { useTranslation } from 'react-i18next';
 import { usePlaybackStore } from '../../../../stores/usePlaybackStore';
 import { resolveHeardAudioEqualizerSettings } from '../../../../utils/audioEqualizerModCurve';
+import { useLumaAudioStore } from '../../../../stores/useLumaAudioStore';
+import { currentTime } from '../../../../stores/motionSignals';
 
 // src/components/app/playback/bridges/usePlaybackAudioBridge.ts
 
@@ -216,7 +218,32 @@ export function usePlaybackAudioBridge({
         if (audioRef.current) {
             syncOutputGain(getTargetPlaybackVolume(), 0.015);
         }
+        if (typeof window !== "undefined" && window.electron?.lumaAudio) {
+            void window.electron.lumaAudio.setVolume(getTargetPlaybackVolume());
+        }
     }, [audioRef, getTargetPlaybackVolume, syncOutputGain]);
+
+    useEffect(() => {
+        const lumaAudio = typeof window !== "undefined" ? window.electron?.lumaAudio : undefined;
+        if (!lumaAudio) return;
+        const timer = setInterval(async () => {
+            const luma = useLumaAudioStore.getState();
+            if (!luma.engineEnabled) return;
+            try {
+                const res = await lumaAudio.getState();
+                if (res.ok && res.state) {
+                    luma.updatePlaybackState(res.state);
+                    if (typeof res.state.position === "number" && Number.isFinite(res.state.position) && res.state.playing) {
+                        currentTime.set(res.state.position);
+                    }
+                    if (typeof res.state.duration === "number" && res.state.duration > 0) {
+                        usePlaybackStore.getState().setDuration(res.state.duration);
+                    }
+                }
+            } catch {}
+        }, 50);
+        return () => clearInterval(timer);
+    }, []);
 
     useEffect(() => {
         localStorage.setItem('local_replaygain_mode', replayGainMode);
@@ -331,6 +358,23 @@ export function usePlaybackAudioBridge({
                 }
 
                 syncOutputGain(getTargetPlaybackVolume(), 0);
+                if (typeof window !== "undefined" && window.electron?.lumaAudio && useLumaAudioStore.getState().engineEnabled) {
+                    const localSongId = (currentSong as SongResult & { localRef?: { songId: string } })?.localRef?.songId;
+                    const localData = localSongId ? localSongs.find(s => s.id === localSongId) : undefined;
+                    const targetFile = localData?.filePath || audioSrc;
+                    if (targetFile) {
+                        const luma = useLumaAudioStore.getState();
+                        void window.electron.lumaAudio.open({
+                            file: targetFile,
+                            backend: luma.backend,
+                            device: luma.activeDeviceIndex,
+                            mode: luma.dsdMode,
+                            pcmRate: luma.pcmRate,
+                            volume: getTargetPlaybackVolume(),
+                            position: 0,
+                        });
+                    }
+                }
                 const playPromise = audioRef.current.play();
                 if (playPromise !== undefined) {
                     playPromise

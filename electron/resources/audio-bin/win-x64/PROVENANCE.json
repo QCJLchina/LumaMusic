@@ -1,0 +1,5 @@
+{
+  "source": "https://github.com/QCJLchina/LumaMusic/releases/tag/v1.0.2",
+  "archive_sha256": "806ce51037ac6da6e5d15116ff7820f8ff1608a570b7df6c978506b3672be8d8",
+  "note": "Unmodified official native release binaries; MSVC unavailable on this machine."
+}

@@ -12,6 +12,7 @@ import { useDesktopSettingsStore } from '../../../../stores/useDesktopSettingsSt
 import { runsOnWindows } from '../../../../utils/platform';
 import { Button, Chips, Group, Reveal, Row, Segmented, Slider, Status, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import AudioOutputDeviceRow from './AudioOutputDeviceRow';
+import LumaAudioEngineGroup from './LumaAudioEngineGroup';
 import { useSettingsPage } from './settingsPageContext';
 
 // src/components/modal/settings/pages/PlaybackPage.tsx
@@ -189,6 +190,7 @@ const PlaybackPage: React.FC = () => {
             </Group>
 
             <Group def={SOUND}>
+                {isElectron && <LumaAudioEngineGroup />}
                 <AudioOutputDeviceRow option={O.outputDevice} onDeviceChange={onAudioOutputDeviceChange} />
                 <Row option={O.replayGain} note={t('options.replayGainModeDesc')}>
                     <Segmented

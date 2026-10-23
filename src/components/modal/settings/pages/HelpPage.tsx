@@ -1,39 +1,23 @@
 import React from 'react';
-import { ChevronRight, CircleHelp, ExternalLink, Lightbulb, MessageCircle, Sparkles, Users, type LucideIcon } from 'lucide-react';
+import { ChevronRight, ExternalLink, Lightbulb, Sparkles, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { openPonderNavigation } from '../../../../services/ponder/pagePonderTarget';
-import { BUILD_KIND_TAGS, getBuildKind } from '../../../../utils/buildProvenance';
 import { PRIMARY_MODIFIER_LABEL } from '../../../../utils/platform';
-import { openDiscordInvite } from '../../../shared/discordCommunity';
-import { QQ_COMMUNITY_GROUP_NUMBER } from '../../../shared/qqCommunity';
-import { HELP_TAB_PLAYER_CONTROLS, HELP_TAB_PRIMARY_SHORTCUTS } from '../../userGuideContent';
-import { Button, CopyButton, CopyValue, Group, Keys, Row, type SettingsGroupDef } from '../kit';
 import { openOutsideLink } from '../../../../utils/system/outsideLink';
-import { FoundUpdateRow } from './FoundUpdateRow';
-import { iconLabel } from './iconLabel';
+import { HELP_TAB_PLAYER_CONTROLS, HELP_TAB_PRIMARY_SHORTCUTS } from '../../userGuideContent';
+import { Button, Group, Keys, Row, type SettingsGroupDef } from '../kit';
 
 // src/components/modal/settings/pages/HelpPage.tsx
 // The 帮助 page, reached from the foot of the side list: two entry cards (the release notes, the
-// Ponder tutorials), the keyboard shortcuts and the player's keys side by side, where to get help
-// (the help dialog, the Discord server, the QQ group), and the version with a found update and the
-// project link. A build that is not this repository's own says so under its version. It is not a settings category, so it
-// is not in pages/index.ts and the search does not list it; the settings window mounts it itself
-// and hands it the two dialogs it opens.
-
-const REPOSITORY_URL = 'https://github.com/chthollyphile/folia-major';
-const REPOSITORY_NAME = 'chthollyphile/folia-major';
-const BUILD_KIND = getBuildKind();
-const VERSION_INFO = (__DOCKER_STACK_VERSION__
-    ? `${__APP_VERSION_LABEL__} v${__APP_VERSION__} · Stack ${__DOCKER_STACK_VERSION__} · ${__COMMIT_HASH__}`
-    : `${__APP_VERSION_LABEL__} v${__APP_VERSION__} - ${__GIT_BRANCH__} - ${__COMMIT_HASH__}`)
-    // Self-hosted and unofficial builds always carry a tag, in English, so a line pasted into an
-    // issue says where the build came from.
-    + (BUILD_KIND === 'official' ? '' : ` · ${BUILD_KIND_TAGS[BUILD_KIND]}`);
+// Ponder tutorials), the keyboard shortcuts and the player's keys side by side, and a note that
+// LumaMusic is built on Folia, with a link to that project. It is not a settings category, so it is
+// not in pages/index.ts and the search does not list it; the settings window mounts it itself and
+// hands it the release notes dialog it opens.
 
 const SHORTCUTS: SettingsGroupDef = { id: 'helpShortcuts', titleKey: 'help.keyboardShortcuts' };
 const PLAYER_KEYS: SettingsGroupDef = { id: 'helpPlayerControls', titleKey: 'help.playerControls' };
-const SUPPORT: SettingsGroupDef = { id: 'helpSupport', titleKey: 'aiHelp.title' };
-const ABOUT: SettingsGroupDef = { id: 'helpAbout', titleKey: 'help.version' };
+const FOLIA: SettingsGroupDef = { id: 'helpFolia', titleKey: 'help.basedOnFolia' };
+const FOLIA_PROJECT_URL = 'https://folia-site.cielaniska.top/';
 
 /** Two columns that become one where a column would be narrower than 280px. */
 const COLUMNS_CLASS = 'grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] gap-x-3';
@@ -90,13 +74,9 @@ const KeyRow: React.FC<KeyRowProps> = ({ label, withPrimaryModifier, keys }) => 
 
 type HelpPageProps = {
     onOpenReleaseNotes: () => void;
-    /** Opens the 遇到问题？ dialog. */
-    onOpenAiHelp: () => void;
-    /** A click on the "Project:" label; the settings window counts them. */
-    onProjectLabelClick: () => void;
 };
 
-const HelpPage: React.FC<HelpPageProps> = ({ onOpenReleaseNotes, onOpenAiHelp, onProjectLabelClick }) => {
+const HelpPage: React.FC<HelpPageProps> = ({ onOpenReleaseNotes }) => {
     const { t } = useTranslation();
 
     return (
@@ -142,39 +122,18 @@ const HelpPage: React.FC<HelpPageProps> = ({ onOpenReleaseNotes, onOpenAiHelp, o
                 </div>
             </div>
 
-            <Group def={SUPPORT} bare>
-                <Row label={iconLabel(CircleHelp, t('aiHelp.openButton'))} onClick={onOpenAiHelp} />
-                <Row label={iconLabel(MessageCircle, t('help.joinDiscord'))} onClick={openDiscordInvite} />
-                {/* A QQ group has no link that opens it: the row gives its number to copy. */}
-                <Row label={iconLabel(Users, t('help.communityQq'))}>
-                    <CopyValue value={QQ_COMMUNITY_GROUP_NUMBER} />
-                </Row>
-            </Group>
-
-            <Group def={ABOUT} bare>
-                <Row label={t('help.version')}>
-                    {/* One piece of the row: a version too long for its line breaks inside itself and keeps the button beside it. */}
-                    <span className="flex min-w-0 items-center gap-2">
-                        <span className="min-w-0 select-text text-right font-mono text-xs text-[color:var(--st-t2)] [overflow-wrap:anywhere]">{VERSION_INFO}</span>
-                        <CopyButton text={VERSION_INFO} />
-                    </span>
-                </Row>
-                {BUILD_KIND !== 'official' && (
-                    <Row sub notice={t(BUILD_KIND === 'unofficial' ? 'options.unofficialBuildNotice' : 'options.selfHostedBuildNotice')} />
-                )}
-                <FoundUpdateRow sub />
+            <Group def={FOLIA} bare>
                 <Row
-                    label={(
-                        // The settings window counts the clicks and shows the cat at the seventh.
-                        <button type="button" onClick={onProjectLabelClick} className="cursor-default">{t('help.madeBy')}</button>
-                    )}
+                    label={t('help.foliaProject')}
+                    hint={t('help.basedOnFolia')}
                 >
-                    <Button variant="quiet" onClick={() => openOutsideLink(REPOSITORY_URL)}>
-                        {REPOSITORY_NAME}
+                    <Button variant="quiet" onClick={() => openOutsideLink(FOLIA_PROJECT_URL)}>
+                        {t('help.openFoliaProject')}
                         <ExternalLink size={12} />
                     </Button>
                 </Row>
             </Group>
+
         </>
     );
 };

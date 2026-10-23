@@ -1,0 +1,17 @@
+#include "windows.h"
+
+1000 DIALOG DISCARDABLE  100, 100, 200, 108
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "BASSmix multiple output example"
+FONT 8, "MS Sans Serif"
+BEGIN
+    GROUPBOX        "Device 1",-1,5,2,190,45
+    COMBOBOX        12,10,11,180,72,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Open file...",10,10,27,180,14
+    GROUPBOX        "Device 2",-1,5,49,190,36
+    COMBOBOX        13,10,58,180,72,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "Clone device 1",11,"Button",BS_AUTOCHECKBOX | 
+                    WS_TABSTOP,67,72,70,10
+    CONTROL         "Slider1",14,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | 
+                    WS_TABSTOP,15,89,170,15
+END

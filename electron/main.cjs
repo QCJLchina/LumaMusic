@@ -100,6 +100,7 @@ const { createGlobalShortcutController, usesGlobalShortcutsPortal } = require('.
 const { createTranscodeService } = require('./transcode/service.cjs');
 const { TRANSCODE_PROTOCOL_SCHEME } = require('./transcode/protocol.cjs');
 const { sanitizeDualTheme: sanitizeGeneratedDualTheme } = require('../shared/themeSanitizer.cjs');
+const lumaAudioHost = require('./lumaAudioHost.cjs');
 const {
   aiProviderLabel,
   runAiConnectionTest,
@@ -2495,7 +2496,7 @@ const FOLIA_GITHUB_REPOSITORY = {
   owner: 'chthollyphile',
   repo: 'folia-major',
 };
-const WINDOWS_APP_USER_MODEL_ID = 'top.izuna.foliamajor';
+const WINDOWS_APP_USER_MODEL_ID = 'top.lumamusic.v2';
 const REMOTE_CONTROL_WINDOW_TITLE = 'Folia Remote';
 const WINDOW_PLAYBACK_HANDOFF_REQUEST_TIMEOUT_MS = 800;
 const bundledAppIconPath = path.join(__dirname, '../build/icon.png');
@@ -6742,6 +6743,15 @@ ipcMain.handle('clear-cover-cache', async () => {
   return true;
 });
 
+ipcMain.handle('luma-audio-is-available', () => lumaAudioHost.isAvailable());
+ipcMain.handle('luma-audio-get-devices', () => lumaAudioHost.getDevices());
+ipcMain.handle('luma-audio-open', (_event, params) => lumaAudioHost.open(params));
+ipcMain.handle('luma-audio-pause', (_event, pauseVal) => lumaAudioHost.pause(pauseVal));
+ipcMain.handle('luma-audio-seek', (_event, position) => lumaAudioHost.seek(position));
+ipcMain.handle('luma-audio-stop', () => lumaAudioHost.stop());
+ipcMain.handle('luma-audio-set-volume', (_event, volume) => lumaAudioHost.setVolume(volume));
+ipcMain.handle('luma-audio-get-state', () => lumaAudioHost.getState());
+
 ipcMain.handle('has-local-cover-asset', async (_event, assetId) => {
   return localCoverAssetStore.has(assetId);
 });
@@ -7203,6 +7213,7 @@ ipcMain.handle('global-shortcuts-set', (event, accelerators) => {
 
 app.on('will-quit', () => {
   globalShortcutController?.dispose();
+  lumaAudioHost.shutdown();
 });
 
 ipcMain.handle('thumbar-update-buttons', (event, state) => {

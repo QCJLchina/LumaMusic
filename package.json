@@ -1,14 +1,14 @@
 {
-  "name": "folia-major",
-  "productName": "Folia",
-  "desktopName": "folia-major.desktop",
-  "description": "Lyrics Reimagine",
+  "name": "lumamusic",
+  "productName": "LumaMusic",
+  "desktopName": "lumamusic.desktop",
+  "description": "LumaMusic v2 - High Performance Bit-Perfect Audio Player",
   "author": {
     "name": "chthollyphile",
     "email": "chthollyphile@users.noreply.github.com"
   },
   "private": true,
-  "version": "0.7.21",
+  "version": "2.0.0",
   "license": "AGPL-3.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -63,8 +63,8 @@
     "manual:ai-probe": "node test/manual/ai_probe.mjs"
   },
   "build": {
-    "appId": "top.izuna.foliamajor",
-    "productName": "Folia",
+    "appId": "top.lumamusic.app",
+    "productName": "LumaMusic",
     "beforePack": "build/beforePack.cjs",
     "afterPack": "build/afterPack.cjs",
     "electronLanguages": [
@@ -89,7 +89,6 @@
       "shared/**/*",
       "!**/node_modules/youtubei.js/bundle/**",
       "package.json",
-      "build/miao.png",
       "build/thumbar/*.png"
     ],
     "asarUnpack": [
@@ -97,6 +96,14 @@
       "node_modules/@lox-audioserver/node-librespot/prebuilds/**/*.node"
     ],
     "extraResources": [
+      {
+        "from": "electron/resources/audio-bin/win-x64",
+        "to": "audio-bin/win-x64",
+        "filter": [
+          "*.dll",
+          "*.exe"
+        ]
+      },
       {
         "from": "build/ffmpeg/${os}-${arch}",
         "to": "ffmpeg-audio"

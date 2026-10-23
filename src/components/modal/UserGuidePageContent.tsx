@@ -217,7 +217,7 @@ export const UserGuidePageContent: React.FC<UserGuidePageContentProps> = ({
     return (
         <div className="flex flex-col items-center justify-center min-h-[320px] text-center">
             <div className={`w-24 h-24 rounded-3xl ${isDaylight ? 'bg-black/[0.03]' : 'bg-white/5'} border ${isDaylight ? 'border-black/10' : 'border-white/10'} flex items-center justify-center mb-6 shadow-lg`}>
-                <img src={foliaIcon} alt="Folia" className="w-16 h-16" />
+                <img src={foliaIcon} alt="LumaMusic" className="w-16 h-16" />
             </div>
             <h2 className={`text-3xl font-bold mb-3 ${textPrimary}`}>
                 {t('userGuide.ready.title', 'Selamat Menggunakan')}

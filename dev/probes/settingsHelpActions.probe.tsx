@@ -10,7 +10,7 @@ import type { ProbeDefinition } from './definition';
 
 // dev/probes/settingsHelpActions.probe.tsx
 // 只挂帮助页，不挂真的 SettingsModal：页面从设置窗口拿的只有更新状态（这里没有新版本）和
-// 打开两个对话框的回调。
+// 打开版本更新对话框的回调。
 
 const PAGE_CONTEXT = {
     viewProps: {
@@ -36,8 +36,6 @@ const ProbeBody: React.FC = () => {
                     <SettingsPageContext.Provider value={PAGE_CONTEXT}>
                         <HelpPage
                             onOpenReleaseNotes={() => setShowReleaseNotes(true)}
-                            onOpenAiHelp={() => {}}
-                            onProjectLabelClick={() => {}}
                         />
                     </SettingsPageContext.Provider>
                 </SettingsKitThemeContext.Provider>

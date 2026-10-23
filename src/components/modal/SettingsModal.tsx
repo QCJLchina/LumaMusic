@@ -22,9 +22,7 @@ import { parseNumberText } from './settings/kit/numberText';
 import { SETTINGS_PAGES, SETTINGS_PAGE_OPTIONS } from './settings/pages';
 import HelpPage from './settings/pages/HelpPage';
 import { SettingsPageContext, type CacheCategory, type SettingsPageContextValue } from './settings/pages/settingsPageContext';
-import { AiHelpPromptModal } from './AiHelpPromptModal';
 import ReleaseNotesDialog from './ReleaseNotesDialog';
-import meowImageUrl from '../../../build/miao.png';
 import type { LyricData } from '../../types';
 import { type SettingsModalState, type SettingsSubviewId, type VisualizerSettingsSection } from '../../stores/useSettingsModalStore';
 import { SettingsAnchorProvider, useSettingsAnchorList, useSettingsAnchorStore } from './settings/navigation/SettingsAnchorContext';
@@ -326,10 +324,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     const [showThemePark, setShowThemePark] = useState(false);
     const [showLyricFilterSettings, setShowLyricFilterSettings] = useState(false);
     const [showGlobalLyricOffset, setShowGlobalLyricOffset] = useState(false);
-    const [showAiHelpPrompt, setShowAiHelpPrompt] = useState(false);
     const [showReleaseNotes, setShowReleaseNotes] = useState(false);
-    const [, setAuthorClickCount] = useState(0);
-    const [meowEasterEgg, setMeowEasterEgg] = useState<{ id: number; } | null>(null);
     const shouldCloseModalOnSubviewBack = initialSubview !== null;
 
     useEffect(() => {
@@ -512,23 +507,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             // Seeing the settings panel should never fail the panel itself.
         });
     }, [updateStatus?.availableVersion, updateStatus?.updateSeen]);
-
-    const handleAuthorLabelClick = () => {
-        setAuthorClickCount((prev) => {
-            const nextCount = prev + 1;
-
-            if (nextCount >= 7) {
-                const id = Date.now();
-                setMeowEasterEgg({ id });
-                window.setTimeout(() => {
-                    setMeowEasterEgg((current) => (current?.id === id ? null : current));
-                }, 2200);
-                return 0;
-            }
-
-            return nextCount;
-        });
-    };
 
     const saveElectronSettings = async () => {
         if ((window as any).electron) {
@@ -899,10 +877,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         || showThemePark
         || showLyricFilterSettings
         || showGlobalLyricOffset
-        || showAiHelpPrompt
         || showReleaseNotes;
 
-    // Escape reaches this window only with none of its four dialogs open: they are sheets, and an
+    // Escape reaches this window only with none of its dialogs open: they are sheets, and an
     // open sheet takes the key on the document and stops it (shared/Sheet.tsx). A menu or a pick
     // list that is open takes the key before this window hears it as well. The two work windows
     // leave Escape to their owner, so they are what it can find open here.
@@ -1219,11 +1196,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                             ) : activeTab === 'help' ? (
                                 <SettingsPageContext.Provider value={pageContext}>
                                     <div className="st-page-in">
-                                        <HelpPage
-                                            onOpenReleaseNotes={() => setShowReleaseNotes(true)}
-                                            onOpenAiHelp={() => setShowAiHelpPrompt(true)}
-                                            onProjectLabelClick={handleAuthorLabelClick}
-                                        />
+                                        <HelpPage onOpenReleaseNotes={() => setShowReleaseNotes(true)} />
                                     </div>
                                 </SettingsPageContext.Provider>
                             ) : ActivePage ? (
@@ -1240,26 +1213,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                 </SettingsKitThemeContext.Provider>
 
-                {/* Footer (Empty now) */}
-                {/* <div className="mt-8 pt-0 border-t-0 p-0" /> */}
-                <AnimatePresence>
-                    {meowEasterEgg && (
-                        <motion.img
-                            key={meowEasterEgg.id}
-                            src={meowImageUrl}
-                            alt=""
-                            aria-hidden="true"
-                            className="pointer-events-none absolute bottom-5 left-1/2 z-20 w-28 -translate-x-1/2 drop-shadow-[0_18px_32px_rgba(0,0,0,0.4)] select-none sm:w-32"
-                            initial={{ opacity: 0, y: 140, scale: 0.92 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 120, scale: 0.96 }}
-                            transition={{
-                                duration: 0.6,
-                                ease: [0.22, 1, 0.36, 1],
-                            }}
-                        />
-                    )}
-                </AnimatePresence>
             </motion.div>
             <AnimatePresence>
                 {showVisPlayground && (
@@ -1418,11 +1371,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 lyrics={currentLyrics}
                 lyricCurrentTime={lyricCurrentTime}
                 onClose={() => closeSubviewOrModal(() => setShowGlobalLyricOffset(false))}
-            />
-            <AiHelpPromptModal
-                isOpen={showAiHelpPrompt}
-                isDaylight={isDaylight}
-                onClose={() => setShowAiHelpPrompt(false)}
             />
             <ReleaseNotesDialog
                 isOpen={showReleaseNotes}

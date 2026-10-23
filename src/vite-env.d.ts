@@ -18,6 +18,64 @@ declare global {
   const __APP_RELEASE_CHANNEL__: string;
   const __DOCKER_STACK_VERSION__: string;
 
+  export interface LumaAudioDevice {
+    index: number;
+    backend: number;
+    name: string;
+    id: string;
+    default: boolean;
+    channels: number;
+    rate: number;
+  }
+
+  export interface LumaPlaybackState {
+    playing: boolean;
+    ended: boolean;
+    failed: boolean;
+    error: string;
+    position: number;
+    duration: number;
+    sourceRate: number;
+    sourceChannels: number;
+    rate: number;
+    channels: number;
+    bits: number;
+    dsd: boolean;
+    mode: number;
+    backend: number;
+    underruns: number;
+    gain: number;
+    deviceGone: boolean;
+  }
+
+  export interface LumaOpenParams {
+    file: string;
+    track?: number;
+    backend?: number;
+    device?: number;
+    mode?: number;
+    pcmRate?: number;
+    forceRate?: number;
+    downmix?: boolean;
+    map?: number[] | null;
+    volume?: number;
+    position?: number;
+    limit?: number;
+    gainLinear?: number;
+    cueStart?: number;
+  }
+
+  export interface LumaAudioApi {
+    isAvailable: () => Promise<boolean>;
+    getDevices: () => Promise<{ ok: boolean; devices: LumaAudioDevice[]; error?: string }>;
+    open: (params: LumaOpenParams) => Promise<{ ok: boolean; error?: string }>;
+    pause: (pauseVal: boolean) => Promise<{ ok: boolean; error?: string }>;
+    seek: (position: number) => Promise<{ ok: boolean; error?: string }>;
+    stop: () => Promise<{ ok: boolean; error?: string }>;
+    setVolume: (volume: number) => Promise<{ ok: boolean; error?: string }>;
+    getState: () => Promise<{ ok: boolean; state: Partial<LumaPlaybackState>; error?: string }>;
+  }
+
   interface Window {
     __FOLIA_RUNTIME_CONFIG__?: {
       aiProvider?: 'gemini' | 'openai';
@@ -764,6 +822,7 @@ declare global {
 
   interface Window {
     electron?: {
+      lumaAudio?: LumaAudioApi;
       webUtils?: {
         /** Resolves the OS path of a dropped File (File.path was removed in modern Electron). */
         getPathForFile: (file: File) => string;

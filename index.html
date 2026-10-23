@@ -9,7 +9,7 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Folia" />
+    <meta name="apple-mobile-web-app-title" content="LumaMusic" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon.svg" />
     <title>Folia</title>
@@ -66,11 +66,11 @@
 
       #app-splash .app-splash-title {
         /* 巨大字号，随视口收缩，窄屏也不会溢出。 */
-        font-size: clamp(64px, 17vw, 200px);
+        font-size: clamp(42px, 10.5vw, 132px);
         font-weight: 600;
         line-height: 1;
-        letter-spacing: 0.06em;
-        text-indent: 0.06em;
+        letter-spacing: 0.04em;
+        text-indent: 0.04em;
       }
 
       /* 每个字母占一个固定宽度的盒子（宽度由脚本按各字体的最大字宽测出来，单位 em，
@@ -141,9 +141,9 @@
     </style>
 </head>
   <body>
-    <div id="app-splash" role="status" aria-live="polite" aria-label="Loading Folia">
+    <div id="app-splash" role="status" aria-live="polite" aria-label="Loading LumaMusic">
       <div class="app-splash-inner">
-        <div class="app-splash-title" aria-label="Folia"><span>F</span><span>o</span><span>l</span><span>i</span><span>a</span></div>
+        <div class="app-splash-title" aria-label="LumaMusic"><span>L</span><span>u</span><span>m</span><span>a</span><span>M</span><span>u</span><span>s</span><span>i</span><span>c</span></div>
         <div class="app-splash-wave" aria-hidden="true">
           <span></span>
           <span></span>
@@ -204,7 +204,7 @@
           // 随机化失败无所谓，CSS 默认值已经能跑一条波形。
         }
 
-        // Folia 五个字母不断跳到不同字形（Loki 片头那种字体轮盘），偶尔整体落回基准样式。
+        // LumaMusic 九个字母不断跳到不同字形（Loki 片头那种字体轮盘），偶尔整体落回基准样式。
         // 只用通用字族，再叠加字重、斜体和横向拉伸——不同机器上装的字体不一样，
         // 单靠字体名会退化成同一张脸，加上这几个轴才保证每次跳变都看得出来。
         try {
