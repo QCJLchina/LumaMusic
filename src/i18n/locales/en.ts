@@ -1696,7 +1696,7 @@ export default {
     "majorUpdateLabel": "{{codename}} Update · Major update",
     "ponder": "Ponder Help",
     "ponderDescription": "Learn LumaMusic's basic controls and operating model",
-    "basedOnFolia": "LumaMusic is developed from Folia as a second-party build.",
+    "basedOnFolia": "LumaMusic is developed from the Folia player as a second-party build.",
     "foliaProject": "Folia project",
     "openFoliaProject": "Open folia-site.cielaniska.top"
   },
@@ -4205,8 +4205,11 @@ export default {
       "side_panel": "How the panel is built and how to switch tabs.",
       "theme_settings": "Presets, where a custom palette comes from, and when it changes by itself.",
       "sign_in": "The home page’s Login button and the pill at the bottom right open the same window.",
-      "lyric_match": "Pick lyrics for a song by hand: change the source, search, look, then save."
-    },
+      "lyric_match": "Pick lyrics for a song by hand: change the source, search, look, then save.",
+      "folia_desktop": "Wallpaper mode, system tray and the remote window — none of them inside the app.",
+      "folia_shortcuts": "Where K, P, B and G each take you.",
+      "folia_transport": "System media keys work from anywhere; inside, Space and {{mod}}+←/→.",
+},
     "categories": {
       "basics": "Getting started",
       "playback": "Playback and controls",
@@ -4775,8 +4778,11 @@ export default {
       "gridPaletteHotkey": "S on the grids",
       "settingsPage": "Options page",
       "signIn": "Signing in to a music platform",
-      "lyricMatch": "The Match Data window"
-    },
+      "lyricMatch": "The Match Data window",
+      "foliaDesktop": "Desktop-only features",
+      "foliaShortcuts": "Keyboard shortcuts",
+      "foliaTransport": "Media keys in other apps",
+},
     "scenes": {
       "bravaisSeamLevels": "Three widths: full, spine, folded",
       "bravaisSeamCollection": "The strip on collection and artist pages",
@@ -4929,8 +4935,11 @@ export default {
       "signInAccount": "Once signed in",
       "lyricMatchSearch": "Change the source, search again",
       "lyricMatchPick": "Pick one and look at its lyrics first",
-      "lyricMatchLocal": "Three extra switches for a local song"
-    },
+      "lyricMatchLocal": "Three extra switches for a local song",
+      "foliaDesktopWallpaper": "Wallpaper mode",
+      "foliaDesktopTray": "System tray",
+      "foliaDesktopRemote": "Remote window",
+},
     "captions": {
       "bravaisSeam": {
         "levelsIntro": "The info strip is the gap that opens down the middle of the wall. This level’s title, description and actions all live in it. It has three widths: full, spine and folded.",

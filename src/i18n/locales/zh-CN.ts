@@ -4205,8 +4205,11 @@ export default {
       "side_panel": "面板分几段、怎么换页。",
       "theme_settings": "预设、自定义配色从哪来，以及配色什么时候自己变。",
       "sign_in": "主页的登录按钮和右下角那一枚开的是同一个窗口。",
-      "lyric_match": "给一首歌手动挑一份歌词：换来源、搜索、先看再保存。"
-    },
+      "lyric_match": "给一首歌手动挑一份歌词：换来源、搜索、先看再保存。",
+      "folia_desktop": "壁纸模式、系统托盘和遥控窗口——都不在应用里面。",
+      "folia_shortcuts": "K、P、B、G 分别带你去哪。",
+      "folia_transport": "系统媒体键在哪都能用；应用里用空格和 {{mod}}+←/→。",
+},
     "categories": {
       "basics": "上手",
       "playback": "播放与控制",
@@ -4775,8 +4778,11 @@ export default {
       "gridPaletteHotkey": "网格上的 S 键",
       "settingsPage": "设置页面",
       "signIn": "登录在线音乐平台",
-      "lyricMatch": "匹配歌词窗口"
-    },
+      "lyricMatch": "匹配歌词窗口",
+      "foliaDesktop": "仅桌面端的功能",
+      "foliaShortcuts": "键盘快捷键",
+      "foliaTransport": "在别的应用里用媒体键",
+},
     "scenes": {
       "bravaisSeamLevels": "三档：完整、书脊、折叠",
       "bravaisSeamCollection": "集合与歌手页的信息条",
@@ -4929,8 +4935,11 @@ export default {
       "signInAccount": "登录之后",
       "lyricMatchSearch": "换来源，重新搜",
       "lyricMatchPick": "挑一条，先看歌词",
-      "lyricMatchLocal": "本地歌曲多出来的三个开关"
-    },
+      "lyricMatchLocal": "本地歌曲多出来的三个开关",
+      "foliaDesktopWallpaper": "壁纸模式",
+      "foliaDesktopTray": "系统托盘",
+      "foliaDesktopRemote": "遥控窗口",
+},
     "captions": {
       "bravaisSeam": {
         "levelsIntro": "信息条是墙中间裂开的那道缝，这一层的标题、说明和操作都在里面。它有三档：完整、书脊、折叠。",

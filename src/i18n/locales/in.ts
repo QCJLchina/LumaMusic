@@ -4205,8 +4205,11 @@ export default {
       "side_panel": "Bagaimana panel disusun dan cara berganti tab.",
       "theme_settings": "Preset, asal palet kustom, dan kapan ia berubah sendiri.",
       "sign_in": "Tombol Login di beranda dan pil di kanan bawah membuka jendela yang sama.",
-      "lyric_match": "Pilih lirik untuk sebuah lagu secara manual: ganti sumber, cari, lihat dulu, lalu simpan."
-    },
+      "lyric_match": "Pilih lirik untuk sebuah lagu secara manual: ganti sumber, cari, lihat dulu, lalu simpan.",
+      "folia_desktop": "Mode wallpaper, tray sistem, dan jendela remote — semuanya di luar aplikasi.",
+      "folia_shortcuts": "Ke mana K, P, B, dan G masing-masing membawa Anda.",
+      "folia_transport": "Tombol media sistem bekerja dari mana saja; di dalam aplikasi pakai Spasi dan {{mod}}+←/→.",
+},
     "categories": {
       "basics": "Memulai",
       "playback": "Pemutaran dan kontrol",
@@ -4775,8 +4778,11 @@ export default {
       "gridPaletteHotkey": "S di kisi",
       "settingsPage": "Halaman Opsi",
       "signIn": "Masuk ke platform musik",
-      "lyricMatch": "Jendela Cocokkan Data"
-    },
+      "lyricMatch": "Jendela Cocokkan Data",
+      "foliaDesktop": "Fitur khusus desktop",
+      "foliaShortcuts": "Pintasan papan ketik",
+      "foliaTransport": "Tombol media di aplikasi lain",
+},
     "scenes": {
       "bravaisSeamLevels": "Tiga lebar: penuh, punggung, terlipat",
       "bravaisSeamCollection": "Strip di halaman koleksi dan artis",
@@ -4929,8 +4935,11 @@ export default {
       "signInAccount": "Setelah masuk",
       "lyricMatchSearch": "Ganti sumber, cari lagi",
       "lyricMatchPick": "Pilih satu dan lihat liriknya dulu",
-      "lyricMatchLocal": "Tiga sakelar tambahan untuk lagu lokal"
-    },
+      "lyricMatchLocal": "Tiga sakelar tambahan untuk lagu lokal",
+      "foliaDesktopWallpaper": "Mode wallpaper",
+      "foliaDesktopTray": "Tray sistem",
+      "foliaDesktopRemote": "Jendela remote",
+},
     "captions": {
       "bravaisSeam": {
         "levelsIntro": "Strip info adalah celah yang terbuka di tengah dinding. Judul, deskripsi, dan aksi tingkat ini semuanya ada di sana. Lebarnya ada tiga: penuh, punggung, dan terlipat.",
