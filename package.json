@@ -3,7 +3,10 @@
   "productName": "LumaMusic",
   "desktopName": "lumamusic.desktop",
   "description": "LumaMusic v2 - High Performance Bit-Perfect Audio Player",
-  "author": "QCJLchina",
+  "author": {
+    "name": "QCJLchina",
+    "email": "QCJLqcjlchina@gmail.com"
+  },
   "private": true,
   "version": "2.0.1",
   "license": "AGPL-3.0",
