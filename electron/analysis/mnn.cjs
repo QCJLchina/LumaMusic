@@ -20,8 +20,8 @@ const { readPackedManifest } = require('./packedWeights.cjs');
 const ABI = 2;
 
 /** The library's file name on this platform. */
-const LIBRARY_FILE = process.platform === 'win32' ? 'folia_mnn.dll'
-    : process.platform === 'darwin' ? 'libfolia_mnn.dylib' : 'libfolia_mnn.so';
+const LIBRARY_FILE = process.platform === 'win32' ? 'lumamusic_mnn.dll'
+    : process.platform === 'darwin' ? 'liblumamusic_mnn.dylib' : 'liblumamusic_mnn.so';
 
 /** Precision codes of folia_mnn_load. Both models ship and are checked in fp32: `high`. */
 const PRECISION = { normal: 0, high: 1, low: 2 };

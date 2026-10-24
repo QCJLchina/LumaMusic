@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=LumaMusic
+Comment=High Performance Bit-Perfect Audio Player
+Exec=lumamusic
+Icon=lumamusic
+Terminal=false
+Type=Application
+Categories=AudioVideo;Player;
+StartupWMClass=lumamusic

@@ -20,9 +20,39 @@ namespace fs=std::filesystem;
 static fs::path appDir;
 static std::mutex gate;
 static std::string errorText;
+// 插件缺失不阻止初始化（常见格式仍能放），但不能静默：解码失败时把它带出来。
+static std::string pluginWarning;
 static bool initialized=false;
 static thread_local std::string resultText;
 static std::vector<HPLUGIN> plugins;
+
+// BASS_WASAPI_INFO.format -> 设备实际位深；float 也按 32-bit 计。
+static int wasapiFormatBits(DWORD format){
+    switch(format){
+        case BASS_WASAPI_FORMAT_8BIT:return 8;
+        case BASS_WASAPI_FORMAT_16BIT:return 16;
+        case BASS_WASAPI_FORMAT_24BIT:return 24;
+        case BASS_WASAPI_FORMAT_32BIT:
+        case BASS_WASAPI_FORMAT_FLOAT:return 32;
+        default:return 0;
+    }
+}
+
+// BASS_ASIO 通道格式 -> 位深；DSD 与未知格式返回 0。
+static int asioFormatBits(DWORD format){
+    if(format&BASS_ASIO_FORMAT_DITHER)format&=~BASS_ASIO_FORMAT_DITHER;
+    switch(format){
+        case BASS_ASIO_FORMAT_16BIT:return 16;
+        case BASS_ASIO_FORMAT_24BIT:return 24;
+        case BASS_ASIO_FORMAT_32BIT:
+        case BASS_ASIO_FORMAT_32BIT16:
+        case BASS_ASIO_FORMAT_32BIT18:
+        case BASS_ASIO_FORMAT_32BIT20:
+        case BASS_ASIO_FORMAT_32BIT24:
+        case BASS_ASIO_FORMAT_FLOAT:return 32;
+        default:return 0;
+    }
+}
 
 class Worker {
     HANDLE process=nullptr, pipe=nullptr;
@@ -79,8 +109,36 @@ struct Engine {
     float gainLinear=1.f;
     // 输出设备被系统移除（拔 USB DAC / 驱动重置），与解码失败区分开以便自动恢复。
     std::atomic<bool> deviceGone{false};
+    // 设备实际协商出的位深；0 表示未知或 DSD 透传（那里没有 PCM 位深可言）。
+    int deviceBits=0;
+    // 引擎侧淡入淡出：网页那一路在接管后被静音，淡入淡出只能在这里做。
+    // 0..1 的当前增益，按每次回调的样本数逐点推进，避免开关处出现爆音。
+    std::atomic<float> fade{1.f};
+    std::atomic<float> fadeTarget{1.f};
+    // 每帧需要的秒数由 rate 决定；pull() 里按实际样本推进。
+    std::atomic<float> fadeSeconds{0.25f};
+    // 每个样本走一步，避免一次回调一个台阶产生的咔哒声。
+    void applyFade(float* samples,size_t frames){
+        float target=fadeTarget.load();
+        float current=fade.load();
+        if(current==target&&target==1.f)return;
+        float seconds=fadeSeconds.load();
+        if(!(seconds>0.f)){fade.store(target);if(target!=1.f)for(size_t i=0;i<frames*channels;++i)samples[i]*=target;return;}
+        float perFrame=1.f/(seconds*(float)rate);
+        for(size_t frame=0;frame<frames;++frame){
+            if(current<target)current=std::min(target,current+perFrame);else if(current>target)current=std::max(target,current-perFrame);
+            float* sample=samples+frame*channels;
+            for(unsigned c=0;c<channels;++c)sample[c]*=current;
+        }
+        fade.store(current);
+    }
     ~Engine(){stop();}
-    void activate(){if(wasapi)BASS_WASAPI_SetDevice(device);if(asio)BASS_ASIO_SetDevice(device);}
+    // 只有已初始化的后端才需要重新选设备；另外 WASAPI 的设备是按索引的，
+    // 这里补上失败的一次性重试（驱动切换瞬间常见）。
+    void activate(){
+        if(wasapi){for(int i=0;i<2;++i){if(BASS_WASAPI_SetDevice(device))break;Sleep(10);}}
+        if(asio){for(int i=0;i<2;++i){if(BASS_ASIO_SetDevice(device))break;Sleep(10);}}
+    }
     void stop(){
         playing=false;quit=true;
         activate();
@@ -128,6 +186,11 @@ struct Engine {
         // ReplayGain 折进软件音量：DSD 透传/原生路径不适用（那里没有浮点样本可乘），
         // 这是位完美的正确行为，不该绕过。
         if(!(dsd&&dsdMode!=0)){auto samples=(float*)buffer;float g=volume.load()*gainLinear;if(g!=1.f)for(size_t i=0;i<n/4;++i)samples[i]*=g;}
+        // 淡入淡出只作用于 PCM 浮点样本：DSD 是位流，乘系数会破坏它。
+        if(!(dsd&&dsdMode!=0)){
+            int frames=(int)(n/(channels*4));
+            applyFade((float*)buffer,(size_t)frames);
+        }
         return length;
     }
     static DWORD CALLBACK wasapiProc(void* p,DWORD n,void* user){return ((Engine*)user)->pull(p,n);}
@@ -171,7 +234,7 @@ struct Engine {
             if(dsdMode==0)source=BASS_StreamCreate(rate,channels,BASS_SAMPLE_FLOAT|BASS_STREAM_DECODE,pcmRead,this);
         }else{
             source=BASS_StreamCreateFile(FALSE,file.c_str(),0,0,BASS_UNICODE|BASS_SAMPLE_FLOAT|BASS_STREAM_DECODE|BASS_ASYNCFILE);
-            if(!source)throw std::runtime_error("无法解码文件（BASS "+std::to_string(BASS_ErrorGetCode())+"）");
+            if(!source)throw std::runtime_error("无法解码文件（BASS "+std::to_string(BASS_ErrorGetCode())+"）"+(pluginWarning.empty()?"":"；"+pluginWarning));
             BASS_CHANNELINFO info{};BASS_ChannelGetInfo(source,&info);sourceRate=rate=info.freq;sourceChannels=channels=info.chans;bits=info.origres;
             duration=BASS_ChannelBytes2Seconds(source,BASS_ChannelGetLength(source,BASS_POS_BYTE));
             if(position>0&&!BASS_ChannelSetPosition(source,BASS_ChannelSeconds2Bytes(source,position),BASS_POS_BYTE))throw std::runtime_error("定位失败");
@@ -179,27 +242,58 @@ struct Engine {
         if(channels>8||!channels)throw std::runtime_error("最多支持 8 个输出声道");
         if(backend==0){
             BASS_WASAPI_DEVICEINFO info{};if(!BASS_WASAPI_GetDeviceInfo(device,&info))throw std::runtime_error("音频设备已不可用");
-            rate=info.mixfreq;if(channels>info.mixchans&&!downmix)throw std::runtime_error("设备声道不足，请确认混成立体声后重试。");
-            channels=info.mixchans;
+            // DSD 的 DoP/原生通道有自己固定的率：共享模式的设备混合率会把它们覆盖成
+            // 44.1/48k，输出就不再是 DSD。DoP 本来也不允许走共享（上面已拦）。
+            if(dsd&&dsdMode!=0){
+                if(channels>info.mixchans&&!downmix)throw std::runtime_error("设备声道不足，请确认混成立体声后重试。");
+                if(downmix)channels=2;
+            }else{
+                rate=info.mixfreq;if(channels>info.mixchans&&!downmix)throw std::runtime_error("设备声道不足，请确认混成立体声后重试。");
+                channels=info.mixchans;
+            }
         }else if(!(dsd&&dsdMode!=0)){
-            if(forceRate)rate=forceRate;if(downmix)channels=2;
+            // WASAPI 独占先试请求率，设备不接受再退回源采样率；ASIO 在 Init 后回退。
+            // 实际生效值经 luma_state 上报，设置页和日志里都看得到。
+            if(forceRate&&backend==1&&forceRate!=rate){
+                if(BASS_WASAPI_CheckFormat(device,forceRate,channels,BASS_WASAPI_EXCLUSIVE|BASS_WASAPI_EVENT)!=(DWORD)-1)rate=forceRate;
+            }
+            if(downmix)channels=2;
         }
         if(!(dsd&&dsdMode!=0)){
             mixer=BASS_Mixer_StreamCreate(rate,channels,BASS_SAMPLE_FLOAT|BASS_STREAM_DECODE|BASS_MIXER_END);
             if(!mixer||!BASS_Mixer_StreamAddChannel(mixer,source,BASS_MIXER_CHAN_DOWNMIX|BASS_MIXER_CHAN_NORAMPIN))throw std::runtime_error("无法配置 PCM 转换链路");
         }
         if(backend==2){
-            if(!BASS_ASIO_Init(device,BASS_ASIO_THREAD|BASS_ASIO_JOINORDER))throw std::runtime_error("ASIO 驱动无法打开："+std::to_string(BASS_ASIO_ErrorGetCode()));
+            // 上一会话可能还没被驱动真正回收：ALREADY 时沿用现有会话，但必须重新选设备并
+            // 重新设率，否则 SetRate 会作用在旧设备/旧状态上，表现为"切了采样率不生效"。
+            if(!BASS_ASIO_Init(device,BASS_ASIO_THREAD|BASS_ASIO_JOINORDER)){
+                if(BASS_ASIO_ErrorGetCode()!=BASS_ERROR_ALREADY)throw std::runtime_error("ASIO 驱动无法打开："+std::to_string(BASS_ASIO_ErrorGetCode()));
+                BASS_ASIO_SetDevice(device);
+            }
             asio=true;
             BASS_ASIO_INFO info{};BASS_ASIO_GetInfo(&info);
             for(unsigned c=0;c<channels;++c)if(mapping[c]<0||mapping[c]>=(int)info.outputs)throw std::runtime_error("ASIO 输出通道不足或映射无效");
             if(dsd&&dsdMode==2&&!BASS_ASIO_SetDSD(TRUE))throw std::runtime_error("当前 ASIO 驱动不支持原生 DSD");
+            // ASIO 支持哪些率只有 Init 之后才能查询：请求率可用就锁过去并重建混音器，
+            // 不可可用则维持源采样率（混音器建时就已是源率，无需重建）。
+            if(forceRate&&!(dsd&&dsdMode!=0)&&forceRate!=rate&&BASS_ASIO_CheckRate(forceRate)){
+                rate=forceRate;
+                mixer=BASS_Mixer_StreamCreate(rate,channels,BASS_SAMPLE_FLOAT|BASS_STREAM_DECODE|BASS_MIXER_END);
+                if(!mixer||!BASS_Mixer_StreamAddChannel(mixer,source,BASS_MIXER_CHAN_DOWNMIX|BASS_MIXER_CHAN_NORAMPIN))throw std::runtime_error("无法配置 PCM 转换链路");
+            }
             if(!BASS_ASIO_CheckRate(rate)||!BASS_ASIO_SetRate(rate))throw std::runtime_error("设备不支持当前采样率，请修改输出格式");
+            // 个别驱动会接受 SetRate 却仍按自己的率跑：以驱动回报的率为准，
+            // 否则界面显示 384k 而硬件实际还是 48k，等于在骗人。
+            {
+                double actual=BASS_ASIO_GetRate();
+                if(actual>0&&std::fabs(actual-(double)rate)>0.5)rate=(uint32_t)std::llround(actual);
+            }
             int first=mapping[0];
             if(!BASS_ASIO_ChannelEnable(FALSE,first,asioProc,this))throw std::runtime_error("ASIO 通道启用失败");
             for(unsigned c=1;c<channels;++c)if(!BASS_ASIO_ChannelJoin(FALSE,mapping[c],first))throw std::runtime_error("ASIO 通道映射失败");
             if(!BASS_ASIO_ChannelSetFormat(FALSE,first,dsd&&dsdMode==2?BASS_ASIO_FORMAT_DSD_MSB:BASS_ASIO_FORMAT_FLOAT))throw std::runtime_error("ASIO 数据格式不受支持");
             BASS_ASIO_SetNotify(asioNotify,this);latency=(double)BASS_ASIO_GetLatency(FALSE)/(dsd&&dsdMode==2?rate/8:rate);
+            if(!(dsd&&dsdMode==2))deviceBits=asioFormatBits(BASS_ASIO_ChannelGetFormat(FALSE,first));
         }else{
             DWORD flags=backend==1?BASS_WASAPI_EXCLUSIVE|BASS_WASAPI_EVENT:0;
             if(BASS_WASAPI_CheckFormat(device,rate,channels,flags)==(DWORD)-1)throw std::runtime_error("设备不支持此采样率或声道，请选择兼容格式");
@@ -215,6 +309,7 @@ struct Engine {
                 throw std::runtime_error("无法取得音频设备（"+std::to_string(code)+"）");
             }
             wasapi=true;BASS_WASAPI_INFO info{};BASS_WASAPI_GetInfo(&info);
+            deviceBits=wasapiFormatBits(info.format);
             if(dsd&&dsdMode==1&&(info.format==BASS_WASAPI_FORMAT_8BIT||info.format==BASS_WASAPI_FORMAT_16BIT))throw std::runtime_error("DoP 输出至少需要 24 位设备格式");
             latency=(double)info.buflen/(rate*channels*4);BASS_WASAPI_SetNotify(wasapiNotify,this);
         }
@@ -269,15 +364,33 @@ struct Engine {
 };
 static std::unique_ptr<Engine> engine;
 
-API int luma_init(const wchar_t* directory){std::lock_guard lock(gate);try{appDir=directory;SetDllDirectoryW(directory);BASS_SetConfig(BASS_CONFIG_UNICODE,TRUE);if(!BASS_Init(0,44100,0,nullptr,nullptr)&&BASS_ErrorGetCode()!=BASS_ERROR_ALREADY)throw std::runtime_error("BASS 初始化失败");for(auto name:{L"bassflac.dll",L"bassape.dll",L"bassalac.dll",L"bassopus.dll",L"basswv.dll"}){auto p=BASS_PluginLoad((appDir/name).c_str(),BASS_UNICODE);if(p)plugins.push_back(p);}initialized=true;return 1;}catch(const std::exception& e){errorText=e.what();return 0;}}
+API int luma_init(const wchar_t* directory){std::lock_guard lock(gate);try{appDir=directory;SetDllDirectoryW(directory);BASS_SetConfig(BASS_CONFIG_UNICODE,TRUE);if(!BASS_Init(0,44100,0,nullptr,nullptr)&&BASS_ErrorGetCode()!=BASS_ERROR_ALREADY)throw std::runtime_error("BASS 初始化失败");
+    // 插件缺失时 BASS 只会在播放那一步报“无法解码”，把缺的 DLL 名字留在这里更像实话。
+    std::string missing;
+    for(auto name:{L"bassflac.dll",L"bassape.dll",L"bassalac.dll",L"bassopus.dll",L"basswv.dll",L"bassdsd.dll"}){
+        auto p=BASS_PluginLoad((appDir/name).c_str(),BASS_UNICODE);
+        if(p)plugins.push_back(p);
+        else missing+=(missing.empty()?"":"、")+utf8(name);
+    }
+    if(!missing.empty())pluginWarning="缺少解码插件："+missing;
+    initialized=true;return 1;}catch(const std::exception& e){errorText=e.what();return 0;}}
 API const char* luma_error(){std::lock_guard lock(gate);resultText=errorText;return resultText.c_str();}
 API const char* luma_devices(){std::lock_guard lock(gate);std::ostringstream o;o<<"[";bool comma=false;BASS_WASAPI_DEVICEINFO d{};for(int i=0;BASS_WASAPI_GetDeviceInfo(i,&d);++i){if(!(d.flags&BASS_DEVICE_ENABLED)||(d.flags&(BASS_DEVICE_INPUT|BASS_DEVICE_LOOPBACK)))continue;if(comma)o<<",";comma=true;o<<"{\"index\":"<<i<<",\"backend\":1,\"name\":"<<quote(d.name?d.name:"")<<",\"id\":"<<quote(d.id?d.id:"")<<",\"default\":"<<((d.flags&BASS_DEVICE_DEFAULT)?"true":"false")<<",\"channels\":"<<d.mixchans<<",\"rate\":"<<d.mixfreq<<"}";}BASS_ASIO_DEVICEINFO a{};for(int i=0;BASS_ASIO_GetDeviceInfo(i,&a);++i){if(comma)o<<",";comma=true;o<<"{\"index\":"<<i<<",\"backend\":2,\"name\":"<<quote(a.name?a.name:"")<<",\"id\":"<<quote(a.driver?a.driver:"")<<",\"default\":false,\"channels\":0,\"rate\":0}";}o<<"]";resultText=o.str();return resultText.c_str();}
-API int luma_open(const wchar_t* file,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,const int* map,float volume,double position,double limit,float gainLinear,double cueStart){std::lock_guard lock(gate);try{engine.reset();auto next=std::make_unique<Engine>();next->file=file;next->track=track;next->backend=backend;next->device=device;next->dsdMode=mode;next->pcmRate=pcmRate;next->forceRate=forceRate;next->downmix=downmix!=0;next->volume=volume;next->gainLinear=(std::isfinite(gainLinear)&&gainLinear>0)?std::clamp(gainLinear,0.01f,4.f):1.f;next->limit=std::isfinite(limit)?limit:0;next->origin=next->limit>0&&std::isfinite(cueStart)?std::clamp(cueStart,0.0,next->limit):0;if(map){for(int i=0;i<8;++i){next->mapping[i]=map[i];for(int j=0;j<i;++j)if(map[i]==map[j])throw std::runtime_error("通道映射不能重复");}}next->open(position);engine=std::move(next);engine->resume();errorText.clear();return 1;}catch(const std::exception& e){errorText=e.what();engine.reset();return 0;}}
+// 每次新开都从静音淡入：上一首暂停/停止后增益会停在 0，不重置就是整首无声。
+API int luma_open(const wchar_t* file,int track,int backend,int device,int mode,int pcmRate,int forceRate,int downmix,const int* map,float volume,double position,double limit,float gainLinear,double cueStart,double fadeIn){std::lock_guard lock(gate);try{engine.reset();auto next=std::make_unique<Engine>();next->file=file;next->track=track;next->backend=backend;next->device=device;next->dsdMode=mode;next->pcmRate=pcmRate;next->forceRate=forceRate;next->downmix=downmix!=0;next->volume=volume;next->gainLinear=(std::isfinite(gainLinear)&&gainLinear>0)?std::clamp(gainLinear,0.01f,4.f):1.f;next->limit=std::isfinite(limit)?limit:0;next->origin=next->limit>0&&std::isfinite(cueStart)?std::clamp(cueStart,0.0,next->limit):0;if(map){for(int i=0;i<8;++i){next->mapping[i]=map[i];for(int j=0;j<i;++j)if(map[i]==map[j])throw std::runtime_error("通道映射不能重复");}}next->open(position);next->fadeSeconds=std::clamp((float)(std::isfinite(fadeIn)?fadeIn:0.0),0.f,5.f);engine=std::move(next);engine->resume();errorText.clear();return 1;}catch(const std::exception& e){errorText=e.what();engine.reset();return 0;}}
 API int luma_pause(int pause){std::lock_guard lock(gate);try{if(!engine)return 0;engine->activate();if(pause){if(engine->asio)BASS_ASIO_Stop();else BASS_WASAPI_Stop(FALSE);engine->playing=false;}else engine->resume();return 1;}catch(const std::exception&e){errorText=e.what();return 0;}}
+// 淡入淡出：目标增益 0..1，秒数为渐变时长；PCM 路径逐样本推进，DSD 位流不参与。
+API int luma_fade(float target,double seconds){std::lock_guard lock(gate);if(!engine)return 0;engine->fadeTarget=std::clamp(target,0.f,1.f);engine->fadeSeconds=std::clamp((float)seconds,0.f,5.f);return 1;}
+// 暂停前先淡出到 0：阻塞到渐变结束，随后的 Stop 才不会在满幅处切断。
+API int luma_fade_wait(float target,double seconds){std::lock_guard lock(gate);if(!engine)return 0;engine->fadeTarget=std::clamp(target,0.f,1.f);engine->fadeSeconds=std::clamp((float)seconds,0.f,5.f);auto deadline=GetTickCount64()+(DWORD)(std::max(0.0,seconds)*1000+100);while(GetTickCount64()<deadline&&std::fabs(engine->fade.load()-engine->fadeTarget.load())>0.001f)Sleep(5);engine->fade.store(engine->fadeTarget.load());return 1;}
 // 真 seek：保留已取得的输出设备（含独占句柄），只重建解码器。
 // 暂停状态下也能定位，播放状态保持不变。
 API int luma_seek(double position){std::lock_guard lock(gate);try{if(!engine)return 0;bool wasPlaying=engine->playing;if(wasPlaying){if(engine->asio)BASS_ASIO_Stop();else BASS_WASAPI_Stop(FALSE);}engine->seek(position);if(wasPlaying)engine->resume();errorText.clear();return 1;}catch(const std::exception&e){errorText=e.what();return 0;}}
-API void luma_stop(){std::lock_guard lock(gate);engine.reset();}
+// 停止后等驱动真正放手再返回：ASIO 和 WASAPI 独占的释放都是异步的，
+// 立刻用新参数重开时会拿到旧会话（表现为切后端/切采样率后仍是旧值）。
+API void luma_stop(){std::lock_guard lock(gate);if(!engine)return;const bool wasWasapi=engine->wasapi,wasAsio=engine->asio;engine.reset();for(int i=0;i<20;++i){bool busy=(wasWasapi&&BASS_WASAPI_IsStarted())||(wasAsio&&BASS_ASIO_IsStarted());if(!busy)break;Sleep(10);}Sleep(30);}
 API void luma_volume(float v){std::lock_guard lock(gate);if(engine)engine->volume=std::clamp(v,0.f,1.f);}
-API const char* luma_state(){std::lock_guard lock(gate);if(!engine){resultText="{}";return resultText.c_str();}auto&e=*engine;bool done=(e.ended&&e.head==e.tail)||e.atLimit();std::ostringstream o;o<<"{\"playing\":"<<(e.playing?"true":"false")<<",\"ended\":"<<(done?"true":"false")<<",\"failed\":"<<(e.failed?"true":"false")<<",\"error\":"<<quote(e.failure)<<",\"position\":"<<e.position()<<",\"duration\":"<<e.span()<<",\"sourceRate\":"<<e.sourceRate<<",\"sourceChannels\":"<<e.sourceChannels<<",\"rate\":"<<e.rate<<",\"channels\":"<<e.channels<<",\"bits\":"<<e.bits<<",\"dsd\":"<<(e.dsd?"true":"false")<<",\"mode\":"<<e.dsdMode<<",\"backend\":"<<e.backend<<",\"underruns\":"<<e.underruns<<",\"gain\":"<<e.gainLinear<<",\"deviceGone\":"<<(e.deviceGone?"true":"false")<<"}";resultText=o.str();return resultText.c_str();}
+API const char* luma_state(){std::lock_guard lock(gate);if(!engine){resultText="{}";return resultText.c_str();}auto&e=*engine;bool done=(e.ended&&e.head==e.tail)||e.atLimit();std::ostringstream o;o<<"{\"playing\":"<<(e.playing?"true":"false")<<",\"ended\":"<<(done?"true":"false")<<",\"failed\":"<<(e.failed?"true":"false")<<",\"error\":"<<quote(e.failure)<<",\"position\":"<<e.position()<<",\"duration\":"<<e.span()<<",\"sourceRate\":"<<e.sourceRate<<",\"sourceChannels\":"<<e.sourceChannels<<",\"rate\":"<<e.rate<<",\"channels\":"<<e.channels<<",\"bits\":"<<e.bits<<",\"deviceBits\":"<<e.deviceBits<<",\"dsd\":"<<(e.dsd?"true":"false")<<",\"mode\":"<<e.dsdMode<<",\"backend\":"<<e.backend<<",\"underruns\":"<<e.underruns<<",\"gain\":"<<e.gainLinear<<",\"deviceGone\":"<<(e.deviceGone?"true":"false")<<"}";resultText=o.str();return resultText.c_str();}
 API void luma_shutdown(){std::lock_guard lock(gate);engine.reset();for(auto p:plugins)BASS_PluginFree(p);plugins.clear();BASS_Free();initialized=false;}
+// 测试入口：位深映射是纯函数，设备不在场也要能回归。
+API int luma_format_bits(int api,DWORD format){return api==0?wasapiFormatBits(format):asioFormatBits(format);}

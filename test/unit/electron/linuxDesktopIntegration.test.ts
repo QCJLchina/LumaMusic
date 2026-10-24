@@ -10,18 +10,18 @@ describe('linuxDesktopIntegration', () => {
   const rootDir = path.resolve(__dirname, '../../../');
   const packageJsonPath = path.join(rootDir, 'package.json');
   const mainCjsPath = path.join(rootDir, 'electron/main.cjs');
-  const linuxDesktopTemplatePath = path.join(rootDir, 'packaging/linux/folia-major.desktop');
-  const aurDesktopPath = path.join(rootDir, 'packaging/aur/folia-major-bin/folia-major.desktop');
-  const aurPkgbuildPath = path.join(rootDir, 'packaging/aur/folia-major-bin/PKGBUILD');
-  const aurSrcinfoPath = path.join(rootDir, 'packaging/aur/folia-major-bin/.SRCINFO');
+  const linuxDesktopTemplatePath = path.join(rootDir, 'packaging/linux/lumamusic.desktop');
+  const aurDesktopPath = path.join(rootDir, 'packaging/aur/lumamusic-bin/lumamusic.desktop');
+  const aurPkgbuildPath = path.join(rootDir, 'packaging/aur/lumamusic-bin/PKGBUILD');
+  const aurSrcinfoPath = path.join(rootDir, 'packaging/aur/lumamusic-bin/.SRCINFO');
 
   it('declares desktopName and syncDesktopName in package.json matching executableName', () => {
     const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 
-    expect(pkg.desktopName).toBe('folia-major.desktop');
-    expect(pkg.build?.linux?.executableName).toBe('folia-major');
+    expect(pkg.desktopName).toBe('lumamusic.desktop');
+    expect(pkg.build?.linux?.executableName).toBe('lumamusic');
     expect(pkg.build?.linux?.syncDesktopName).toBe(true);
-    expect(pkg.build?.linux?.desktop?.entry?.StartupWMClass).toBe('folia-major');
+    expect(pkg.build?.linux?.desktop?.entry?.StartupWMClass).toBe('lumamusic');
   });
 
   it('leaves Linux desktop identity to package.json desktopName instead of electron/main.cjs', () => {
@@ -31,15 +31,15 @@ describe('linuxDesktopIntegration', () => {
     expect(mainContent).not.toContain('app.setDesktopName(');
   });
 
-  it('aligns StartupWMClass to folia-major in portable linux desktop entry', () => {
+  it('aligns StartupWMClass to lumamusic in portable linux desktop entry', () => {
     const content = fs.readFileSync(linuxDesktopTemplatePath, 'utf8');
 
-    expect(content).toMatch(/^StartupWMClass=folia-major$/m);
+    expect(content).toMatch(/^StartupWMClass=lumamusic$/m);
   });
 
   it('aligns StartupWMClass and verifies sha256 checksums in AUR package', () => {
     const desktopContent = fs.readFileSync(aurDesktopPath, 'utf8');
-    expect(desktopContent).toMatch(/^StartupWMClass=folia-major$/m);
+    expect(desktopContent).toMatch(/^StartupWMClass=lumamusic$/m);
 
     const desktopHash = crypto.createHash('sha256').update(desktopContent).digest('hex');
     const pkgbuildContent = fs.readFileSync(aurPkgbuildPath, 'utf8');

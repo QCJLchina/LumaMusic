@@ -2,8 +2,8 @@
 // Build the Windows wallpaper helper (Windows desktop wallpaper mode.
 //
 // Builds the Rust crate in packaging/windows/wallpaper-helper/ with `cargo build --release` and
-// copies folia-wallpaper-helper.exe into build/ so electron-builder's win extraResources packages
-// it as resources/folia-wallpaper-helper.exe. Mirrors packaging/linux/build-windowtolayer.mjs:
+// copies lumamusic-wallpaper-helper.exe into build/ so electron-builder's win extraResources
+// packages it as resources/lumamusic-wallpaper-helper.exe. Mirrors packaging/linux/build-windowtolayer.mjs:
 // shared by local `npm run build:electron*` and the CI release workflow, and its output doubles
 // as the dev-path override for FOLIA_WALLPAPER_HELPER_PATH (see resolveWallpaperHelperPath in
 // electron/main.cjs). No-op on non-Windows hosts (the Linux/macOS build must not depend on a
@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SRC_DIR = path.join(ROOT, 'packaging', 'windows', 'wallpaper-helper');
 const OUT_DIR = path.join(ROOT, 'build');
-const OUT_BIN = path.join(OUT_DIR, 'folia-wallpaper-helper.exe');
+const OUT_BIN = path.join(OUT_DIR, 'lumamusic-wallpaper-helper.exe');
 
 function run(command, args) {
   execFileSync(command, args, { stdio: 'inherit', cwd: SRC_DIR });
@@ -30,7 +30,7 @@ if (process.platform !== 'win32') {
 mkdirSync(OUT_DIR, { recursive: true });
 try {
   run('cargo', ['build', '--release']);
-  copyFileSync(path.join(SRC_DIR, 'target', 'release', 'folia-wallpaper-helper.exe'), OUT_BIN);
+  copyFileSync(path.join(SRC_DIR, 'target', 'release', 'lumamusic-wallpaper-helper.exe'), OUT_BIN);
   console.log(`[wallpaper-helper] built ${OUT_BIN}`);
 } catch (error) {
   console.warn(`[wallpaper-helper] cargo build skipped: ${error.message}`);

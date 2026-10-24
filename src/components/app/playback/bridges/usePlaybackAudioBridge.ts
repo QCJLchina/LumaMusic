@@ -17,8 +17,10 @@ import { setPlayerState } from '../../../../stores/usePlaybackStore';
 import { useTranslation } from 'react-i18next';
 import { usePlaybackStore } from '../../../../stores/usePlaybackStore';
 import { resolveHeardAudioEqualizerSettings } from '../../../../utils/audioEqualizerModCurve';
-import { useLumaAudioStore } from '../../../../stores/useLumaAudioStore';
+import { resolveLumaForceRate, useLumaAudioStore } from '../../../../stores/useLumaAudioStore';
 import { currentTime } from '../../../../stores/motionSignals';
+import { PLAYBACK_FADE_SECONDS } from '../../../../services/playbackFade';
+import { mustWaitForNativeEngine } from './nativeEngineStartGate';
 
 // src/components/app/playback/bridges/usePlaybackAudioBridge.ts
 
@@ -78,6 +80,10 @@ export function usePlaybackAudioBridge({
     const replayGainLogSignatureRef = useRef<string | null>(null);
     const equalizerNodesRef = useRef<BiquadFilterNode[]>([]);
     const effectChainRef = useRef<AudioEffectChain | null>(null);
+    const outputGateRef = useRef<GainNode | null>(null);
+    // The engine's own position and when it was sampled; used to advance the UI clock between
+    // status polls instead of letting it stutter by one IPC round trip.
+    const engineClockRef = useRef<{ position: number; at: number; sourceRate: number; } | null>(null);
     const audioEqualizerSettings = useAudioSettingsStore(state => state.audioEqualizerSettings);
     // What is heard: the listener's own settings with a mod's curve over the gains (Folium 1.7). Worked out
     // here rather than in a selector, which would hand useSyncExternalStore a new object on every read.
@@ -164,7 +170,7 @@ export function usePlaybackAudioBridge({
             analyser.smoothingTimeConstant = 0.6;
             analyserRef.current = analyser;
 
-            const { gainNode, fadeNode, effectChain, decksConnected } = buildPlaybackGraph({
+            const { gainNode, fadeNode, effectChain, outputGate, decksConnected } = buildPlaybackGraph({
                 context: ctx,
                 analyser,
                 connectDecks,
@@ -176,6 +182,7 @@ export function usePlaybackAudioBridge({
             // resume see no graph and fall back to plain element pause/play.
             registerPlaybackFadeGraph({ context: ctx, gain: fadeNode });
             effectChainRef.current = effectChain;
+            outputGateRef.current = outputGate;
             if (!decksConnected) {
                 console.warn('[AudioContext] Deck setup incomplete, automix will stay idle');
             }
@@ -214,6 +221,94 @@ export function usePlaybackAudioBridge({
         [audioSrc, cacheSongAssetsFor, currentSong, getCoverUrl],
     );
 
+    // 打开原生引擎的唯一入口：自动播放和设置变化重开都走这里，参数永远取自当前 store。
+    // 不能用 isLumaPlaying 当门槛——引擎从没打开过时它永远是 false，会把首次打开拦死。
+    const openNativeEngine = useCallback(async (position: number) => {
+        if (typeof window === "undefined" || !window.electron?.lumaAudio) return;
+        const luma = useLumaAudioStore.getState();
+        if (!luma.engineEnabled) return;
+        const localSongId = (currentSong as SongResult & { localRef?: { songId: string } })?.localRef?.songId;
+        const localData = localSongId ? localSongs.find(s => s.id === localSongId) : undefined;
+        // BASS only takes real files. A local track's permission lives on the renderer's file
+        // handle, and the in-app stream schemes (blob: and the per-platform ones) mean nothing
+        // to the native engine, so every non-HTTP source is read to bytes here and staged on disk.
+        let targetFile = audioSrc;
+        const isRemoteHttp = typeof targetFile === 'string' && /^https?:\/\//i.test(targetFile);
+        let needsStaging = Boolean(targetFile) && !isRemoteHttp;
+        if (localData) {
+            // 首选真实路径：曲库的文件句柄拿到的 File 能直接解析成绝对路径，
+            // 引擎原位读取，不用把整首（DSD 可能几百 MB）读进内存再过一次 IPC。
+            const file = await import('../../../../services/localMusicService')
+                .then(module => module.getFileFromLocalSong(localData))
+                .catch(() => null);
+            const directPath = file ? window.electron?.webUtils?.getPathForFile(file) : '';
+            if (directPath) {
+                targetFile = directPath;
+                needsStaging = false;
+            }
+        }
+        if (needsStaging) {
+            const bytes = localData
+                // Loaded on demand: the local library pulls in the whole i18n/music stack,
+                // and a static import here would drag it into every test that touches this hook.
+                ? await import('../../../../services/localMusicService')
+                    .then(module => module.getLocalSongArrayBuffer(localData))
+                    .catch(() => null)
+                : await fetch(targetFile!).then(res => (res.ok ? res.arrayBuffer() : null)).catch(() => null);
+            if (!bytes) {
+                const error = localData
+                    ? "无法读取本地文件（请重新授权曲库文件夹）"
+                    : "无法读取音频流";
+                useLumaAudioStore.setState({ openError: error });
+                console.warn('[LumaAudio] audio bytes unreadable:', localData?.id ?? targetFile);
+                return;
+            }
+            const digest = await crypto.subtle.digest('SHA-256', bytes);
+            const hash = Array.from(new Uint8Array(digest).slice(0, 12))
+                .map(byte => byte.toString(16).padStart(2, '0'))
+                .join('');
+            const staged = await window.electron.lumaAudio.stageLocalFile(
+                `${localData?.id ?? 'stream'}-${hash}`,
+                bytes,
+            );
+            if (!staged.ok || !staged.path) {
+                const error = staged.error || "无法为引擎准备本地文件";
+                useLumaAudioStore.setState({ openError: error });
+                console.warn('[LumaAudio] staging local file failed:', error);
+                return;
+            }
+            targetFile = staged.path;
+        }
+        if (!targetFile) return;
+        // 引擎失败时网页 <audio> 会继续出声，听起来"一切正常"——
+        // 不把错误打出来用户就无从发现独占根本没打开。
+        const res = await window.electron.lumaAudio.open({
+            file: targetFile,
+            backend: luma.backend,
+            device: luma.activeDeviceIndex,
+            mode: luma.dsdMode,
+            pcmRate: luma.pcmRate,
+            forceRate: resolveLumaForceRate(luma),
+            volume: getTargetPlaybackVolume(),
+            position,
+            // 引擎接管时网页 fade 节点被钉在 0，淡入只能在引擎自己这边做。
+            fadeIn: useAudioSettingsStore.getState().playbackFadeEnabled ? PLAYBACK_FADE_SECONDS : 0,
+        });
+        useLumaAudioStore.setState({ openError: res.ok ? "" : res.error || "unknown", engineOwnsOutput: res.ok });
+        // A new stream starts its clock from scratch; anything sampled from the old one is stale.
+        engineClockRef.current = null;
+        // 引擎接管后，网页这一路只用来喂可视化和效果，不能再送到扬声器：
+        // 否则共享模式会双份出声，独占模式下两条流还会互相抢设备。
+        // 静音必须落在分析器之后的输出门，分析器才能继续拿到满幅信号。
+        const context = audioContextRef.current;
+        const gate = outputGateRef.current;
+        if (gate && context) {
+            gate.gain.cancelScheduledValues(context.currentTime);
+            gate.gain.setValueAtTime(res.ok ? 0 : 1, context.currentTime);
+        }
+        if (!res.ok) console.warn('[LumaAudio] native engine open failed:', res.error);
+    }, [audioContextRef, audioSrc, currentSong, gainNodeRef, getTargetPlaybackVolume, localSongs, syncOutputGain]);
+
     useEffect(() => {
         if (audioRef.current) {
             syncOutputGain(getTargetPlaybackVolume(), 0.015);
@@ -226,7 +321,67 @@ export function usePlaybackAudioBridge({
     useEffect(() => {
         const lumaAudio = typeof window !== "undefined" ? window.electron?.lumaAudio : undefined;
         if (!lumaAudio) return;
+        // 只有输出相关的设置才重开引擎：轮询每 50ms 写一次 playbackState（播放位置），
+        // 无差别订阅等于每秒 20 次重开独占设备，直接把主进程和 UI 冻住。
+        let lastConfig = '';
+        let configDirty = false;
+        let reopening = false;
+        const configOf = (s: ReturnType<typeof useLumaAudioStore.getState>) =>
+            // activeDeviceId 必须参与：两套枚举里 index 会撞（都从 0 起），只看 index
+            // 切到另一台同号设备会被当成"没变"，引擎留在旧设备上。
+            `${s.engineEnabled}|${s.backend}|${s.activeDeviceId}|${s.activeDeviceIndex}|${s.dsdMode}|${s.pcmRate}|${s.rateMode}`;
+        const unsubscribe = useLumaAudioStore.subscribe(state => {
+            const next = configOf(state);
+            if (next === lastConfig) return;
+            lastConfig = next;
+            configDirty = true;
+        });
+        lastConfig = configOf(useLumaAudioStore.getState());
+        let reopenPending = false;
+        const maybeReopen = async () => {
+            if (!configDirty || reopening) return;
+            reopening = true;
+            configDirty = false;
+            try {
+                const luma = useLumaAudioStore.getState();
+                // 播放中才按新配置重开；暂停时改设置留给恢复播放的那次打开。
+                if (luma.engineEnabled && luma.isLumaPlaying) {
+                    // 换设备/换率时先淡出，避免旧设备被硬切产生的爆音。
+                    if (useAudioSettingsStore.getState().playbackFadeEnabled) {
+                        await window.electron?.lumaAudio?.fadeWait(0, PLAYBACK_FADE_SECONDS);
+                    }
+                    // 必须先释放旧会话再开新的：ASIO 驱动同一时刻只接受一个实例，
+                    // WASAPI 独占句柄不放手时切共享/换率也会被拒。只靠 luma_open 内部的
+                    // reset 已经太晚——新后端在那之前就开始要设备了。
+                    await window.electron?.lumaAudio?.stop();
+                    engineClockRef.current = null;
+                    await openNativeEngine(currentTime.get());
+                } else {
+                    await window.electron?.lumaAudio?.stop();
+                    useLumaAudioStore.setState({ openError: "", engineOwnsOutput: false });
+                    const gate = outputGateRef.current;
+                    const context = audioContextRef.current;
+                    if (gate && context) {
+                        gate.gain.cancelScheduledValues(context.currentTime);
+                        gate.gain.setValueAtTime(1, context.currentTime);
+                    }
+                    syncOutputGain(getTargetPlaybackVolume(), 0);
+                }
+            } catch (error) {
+                // 一次失败不能把后续切换永久锁死：openNativeEngine 内部已写 openError，
+                // 这里只保证 reopening 归位。
+                console.warn('[LumaAudio] reopen failed:', error);
+            } finally {
+                reopening = false;
+                // 重开期间用户又改了配置：再跑一轮，落到最后那次选择上。
+                if (configDirty && !reopenPending) {
+                    reopenPending = true;
+                    queueMicrotask(() => { reopenPending = false; void maybeReopen(); });
+                }
+            }
+        };
         const timer = setInterval(async () => {
+            void maybeReopen();
             const luma = useLumaAudioStore.getState();
             if (!luma.engineEnabled) return;
             try {
@@ -234,13 +389,44 @@ export function usePlaybackAudioBridge({
                 if (res.ok && res.state) {
                     luma.updatePlaybackState(res.state);
                     if (typeof res.state.position === "number" && Number.isFinite(res.state.position) && res.state.playing) {
+                        // 记录引擎位置与其到达时刻：两次轮询之间由本地时钟继续推进，
+                        // 歌词和动画才不会因为 IPC 的 50ms 往返而落后于声音。
+                        engineClockRef.current = {
+                            position: res.state.position,
+                            at: performance.now(),
+                            sourceRate: res.state.rate ?? 0,
+                        };
                         currentTime.set(res.state.position);
+                    } else if (res.state.playing === false) {
+                        // Paused or ended: stop extrapolating, and take the engine's final position
+                        // so the picture settles where the sound actually stopped.
+                        engineClockRef.current = null;
+                        if (typeof res.state.position === "number" && Number.isFinite(res.state.position)) {
+                            currentTime.set(res.state.position);
+                        }
                     }
                     if (typeof res.state.duration === "number" && res.state.duration > 0) {
                         usePlaybackStore.getState().setDuration(res.state.duration);
                     }
                 }
             } catch {}
+        }, 50);
+        return () => { unsubscribe(); clearInterval(timer); };
+    }, [openNativeEngine]);
+
+    useEffect(() => {
+        // Between status polls the engine keeps playing, so the UI clock has to as well. A short
+        // interval rather than requestAnimationFrame: this only has to feed the lyric/visual clock,
+        // and the project's high frequency animation paths must not gain another per-frame writer.
+        const timer = setInterval(() => {
+            const luma = useLumaAudioStore.getState();
+            const sample = engineClockRef.current;
+            if (!luma.engineOwnsOutput || !sample || !luma.isLumaPlaying) return;
+            const elapsed = (performance.now() - sample.at) / 1000;
+            const duration = usePlaybackStore.getState().duration;
+            const next = sample.position + elapsed;
+            if (Number.isFinite(duration) && duration > 0 && next >= duration) return;
+            currentTime.set(next);
         }, 50);
         return () => clearInterval(timer);
     }, []);
@@ -358,24 +544,17 @@ export function usePlaybackAudioBridge({
                 }
 
                 syncOutputGain(getTargetPlaybackVolume(), 0);
-                if (typeof window !== "undefined" && window.electron?.lumaAudio && useLumaAudioStore.getState().engineEnabled) {
-                    const localSongId = (currentSong as SongResult & { localRef?: { songId: string } })?.localRef?.songId;
-                    const localData = localSongId ? localSongs.find(s => s.id === localSongId) : undefined;
-                    const targetFile = localData?.filePath || audioSrc;
-                    if (targetFile) {
-                        const luma = useLumaAudioStore.getState();
-                        void window.electron.lumaAudio.open({
-                            file: targetFile,
-                            backend: luma.backend,
-                            device: luma.activeDeviceIndex,
-                            mode: luma.dsdMode,
-                            pcmRate: luma.pcmRate,
-                            volume: getTargetPlaybackVolume(),
-                            position: 0,
-                        });
-                    }
-                }
-                const playPromise = audioRef.current.play();
+                // 等引擎真的打开再启动 deck：否则 deck 先跑起来、引擎还在落盘/初始化，
+                // 两套时钟从不同起点各走各的，切歌就会音画不同步。
+                const engineOwned = mustWaitForNativeEngine(
+                    typeof window !== "undefined" && Boolean(window.electron?.lumaAudio),
+                    useLumaAudioStore.getState().engineEnabled,
+                );
+                // 引擎打开失败不该让整首歌放不出来：openNativeEngine 已把错误写进 store，
+                // 这里照常启动网页 deck，播放降级为网页路径。
+                const playPromise = engineOwned
+                    ? openNativeEngine(0).catch(() => undefined).then(() => audioRef.current?.play())
+                    : audioRef.current?.play();
                 if (playPromise !== undefined) {
                     playPromise
                         .then(() => {
@@ -407,7 +586,7 @@ export function usePlaybackAudioBridge({
                 }
             }
         }
-    }, [audioRef, audioSrc, getTargetPlaybackVolume, isAutoplayHeld, isLyricsLoading, setPlayerState, setStatusMsg, setupAudioAnalyzer, shouldAutoPlayRef, suppressAutoplayRef, syncOutputGain, t]);
+        }, [audioRef, audioSrc, getTargetPlaybackVolume, isAutoplayHeld, isLyricsLoading, openNativeEngine, setPlayerState, setStatusMsg, setupAudioAnalyzer, shouldAutoPlayRef, suppressAutoplayRef, syncOutputGain, t]);
 
     // Tells this bridge that the active deck ALREADY holds `src` and is sounding it, so the next time
     // `audioSrc` settles on that value the reload effect above treats it as a no-op instead of calling

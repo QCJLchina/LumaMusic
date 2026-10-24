@@ -30,6 +30,12 @@ export type PlaybackGraph = {
      */
     fadeNode: GainNode;
     effectChain: AudioEffectChain;
+    /**
+     * The last node before the speakers. Left at unity normally; closed only while the native
+     * engine owns the output, so this path keeps feeding the analyser (visualiser) at full level
+     * without also sounding through Chromium's own mixer.
+     */
+    outputGate: GainNode;
     /** False when a deck was missing, so automix will stay idle. Audio still flows. */
     decksConnected: boolean;
 };
@@ -94,16 +100,20 @@ export const buildPlaybackGraph = ({
     // The analyser stays last, so the visualiser draws what is actually being heard - including
     // the volume the listener set.
     fadeNode.connect(analyser);
-    analyser.connect(context.destination);
+    // Muting for the native engine must happen AFTER the analyser: closing the volume node (as
+    // this used to do) also zeroed everything the visualiser reads, so lyrics animation froze.
+    const outputGate = context.createGain();
+    analyser.connect(outputGate);
+    outputGate.connect(context.destination);
 
     // Once per audio context. Printed rather than assumed because the ORDER is the fix: if this
     // ever reads "volume" before "effects" again, the vinyl noise has stopped answering the
     // volume control and the bit crush has gone back to tracking it.
     console.log(
-        '[AudioContext] graph: decks -> mix -> equaliser -> effects -> volume -> fade -> analyser -> out'
+        '[AudioContext] graph: decks -> mix -> equaliser -> effects -> volume -> fade -> analyser -> gate -> out'
         + ` (equaliser ${settings.enabled ? 'on' : 'flat'},`
         + ` noise ${settings.effects.noise}, crush ${settings.effects.crush}, punch ${settings.effects.punch})`,
     );
 
-    return { gainNode, fadeNode, effectChain, decksConnected };
+    return { gainNode, fadeNode, effectChain, outputGate, decksConnected };
 };

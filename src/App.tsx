@@ -38,6 +38,7 @@ import { createLyricFilterPatternSaver } from './components/app/home/createLyric
 import { nextLyricStaffAbsorbMode, nextLyricStaffPolicy } from './utils/lyrics/staffCreditsPolicy';
 import { createPanelNavigation } from './components/app/navigation/createPanelNavigation';
 import { usePlayingSongLocatorStore } from './stores/usePlayingSongLocatorStore';
+import { useLumaAudioStore } from './stores/useLumaAudioStore';
 import { createOnlineGridViewCollection, type GridViewCollectionDescriptor } from './components/app/home/gridViewCollectionAdapters';
 import { buildAppStyle } from './components/app/presentation/buildAppStyle';
 import { buildDebugSnapshot } from './components/app/presentation/buildDebugSnapshot';
@@ -558,6 +559,8 @@ export default function App() {
     const persistLastPlaybackCache = useCallback(persistPlaybackCache, []);
 
     const syncOutputGain = useCallback((targetVolume: number, smoothing = 0.015) => {
+        // 这里只写监听者的音量。引擎接管时的静音在播放图最末端的 outputGate 上做：
+        // 若在这里清零，分析器读到的也是 0，可视化和歌词动画就停了。
         const clampedVolume = clampMediaVolume(targetVolume);
 
         if (gainNodeRef.current && audioContextRef.current) {
@@ -2448,13 +2451,13 @@ export default function App() {
                 // The same split onTimeUpdate, onSeeked and onLoadedMetadata all make, and the two
                 // handlers that were missing it: while the picture is held this deck is the track
                 // ARRIVING, so its position belongs to a song whose title nobody can see yet.
-                if (!isShowingTail) currentTime.set(e.currentTarget.currentTime);
+                if (!isShowingTail && !useLumaAudioStore.getState().engineOwnsOutput) currentTime.set(e.currentTarget.currentTime);
                 setPlayerState(PlayerState.PLAYING);
             }}
             onPlaying={(e) => {
                 if (!automix.isActiveDeck(e.currentTarget)) return;
                 shouldAutoPlay.current = false;
-                if (!isShowingTail) currentTime.set(e.currentTarget.currentTime);
+                if (!isShowingTail && !useLumaAudioStore.getState().engineOwnsOutput) currentTime.set(e.currentTarget.currentTime);
                 setupAudioAnalyzer();
                 playbackAutoSkipCountRef.current = 0;
                 // The source plays, so a later TTL refresh of the same media is legitimate again.
@@ -2485,6 +2488,10 @@ export default function App() {
             }}
             onTimeUpdate={(e) => {
                 const audioElement = e.currentTarget;
+                // 引擎接管后，网页 deck 只喂可视化和效果，它的时钟和真正出声的引擎是两条线
+                // （引擎从落盘文件读，deck 从 blob 读，切歌时 deck 还会从 0 重来）。
+                // 进度必须以引擎为准，否则这里每 250ms 把歌词/动画拽回 deck 的位置。
+                if (useLumaAudioStore.getState().engineOwnsOutput) return;
                 const isActive = automix.isActiveDeck(audioElement);
                 // The clock and the transport are driven by different decks during a transition.
                 // The picture still belongs to the track that is finishing, so the progress bar has
@@ -2532,6 +2539,7 @@ export default function App() {
             onSeeked={(e) => {
                 // Same split as onTimeUpdate: whichever deck the bar is showing is the one a seek
                 // on it has to be reflected from.
+                if (useLumaAudioStore.getState().engineOwnsOutput) return;
                 const isActive = automix.isActiveDeck(e.currentTarget);
                 if (isShowingTail ? !isActive : isActive) currentTime.set(e.currentTarget.currentTime);
             }}
@@ -2603,12 +2611,15 @@ export default function App() {
                         : pendingResumeTime;
                     const nextTime = Math.min(pendingResumeTime, safeDuration);
                     audioElement.currentTime = nextTime;
-                    currentTime.set(nextTime);
+                    // Engine-owned playback keeps its own clock; the deck only feeds visuals.
+                    if (!useLumaAudioStore.getState().engineOwnsOutput) currentTime.set(nextTime);
                     pendingResumeTimeRef.current = null;
                     return;
                 }
 
-                currentTime.set(0); // Ensure currentTime is reset when new audio loads
+                // Ensure currentTime is reset when new audio loads (not while the engine owns it:
+                // the engine is already playing and its position is the truth).
+                if (!useLumaAudioStore.getState().engineOwnsOutput) currentTime.set(0);
             }}
             onError={(e) => {
                 const audioElement = e.currentTarget;

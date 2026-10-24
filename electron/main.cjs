@@ -6,7 +6,9 @@ for (const repair of require('./tempDirEnvironment.cjs').repairTempDirEnvironmen
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const os = require('os');
 const { spawn } = require('child_process');
+app.setName('LumaMusic');
 const Store = require('electron-store').default || require('electron-store');
 const crypto = require('crypto');
 const { createStageApi } = require('./stageApi.cjs');
@@ -125,7 +127,7 @@ const isAppImageRuntime =
 const linuxGraphicsMode =
   process.platform !== 'linux'
     ? 'system'
-    : (process.env.FOLIA_LINUX_GRAPHICS_MODE || (isAppImageRuntime ? 'swiftshader' : 'system'));
+    : (process.env.LUMA_LINUX_GRAPHICS_MODE || (isAppImageRuntime ? 'swiftshader' : 'system'));
 
 // Every custom scheme must be registered in this one call: each
 // registerSchemesAsPrivileged call overwrites the fetch/secure/cors scheme
@@ -454,7 +456,7 @@ const wallpaperWatchdog = wallpaperWatchdogModule.createWallpaperWatchdog({
   probeIntervalMs: 2000,
 });
 
-// --- Windows wallpaper mode (WorkerW parenting via folia-wallpaper-helper.exe) ---
+// --- Windows wallpaper mode (WorkerW parenting via lumamusic-wallpaper-helper.exe) ---
 // Unlike the Linux paths there is no relaunch: the helper parents the existing window into the
 // WorkerW layer at runtime. Mode toggles recreate the window in place with a playback handoff.
 
@@ -494,7 +496,7 @@ function reconcileWindowsWallpaperWindowTransparency() {
   recreateMainWindowWithTransparencyMode(isTransparentPlayerBackgroundEnabled(), null);
 }
 
-// The helper ships as resources/folia-wallpaper-helper.exe (built by
+// The helper ships as resources/lumamusic-wallpaper-helper.exe (built by
 // packaging/windows/build-wallpaper-helper.mjs). FOLIA_WALLPAPER_HELPER_PATH overrides it for
 // non-packaged (dev) runs, mirroring FOLIA_WINDOWTOLAYER_PATH. A missing binary just disables
 // wallpaper mode (attach reports 'missing' and the renderer learns via wallpaper-mode-changed).
@@ -503,7 +505,7 @@ function resolveWallpaperHelperPath() {
   if (override) {
     return fs.existsSync(override) ? override : null;
   }
-  const candidate = path.join(process.resourcesPath, 'folia-wallpaper-helper.exe');
+  const candidate = path.join(process.resourcesPath, 'lumamusic-wallpaper-helper.exe');
   return fs.existsSync(candidate) ? candidate : null;
 }
 function refreshWindowsDesktopWallpaper() {
@@ -1898,13 +1900,13 @@ function readMacWallpaperStageState() {
   };
 }
 
-// Packaged: Resources/libfolia_click_guard.dylib (built by packaging/macos/build-desktop-click-guard.mjs).
+// Packaged: Resources/liblumamusic_click_guard.dylib (built by packaging/macos/build-desktop-click-guard.mjs).
 // FOLIA_DESKTOP_CLICK_GUARD_PATH overrides it for local runs.
 function resolveMacDesktopClickGuardPath() {
   if (process.env.FOLIA_DESKTOP_CLICK_GUARD_PATH) {
     return process.env.FOLIA_DESKTOP_CLICK_GUARD_PATH;
   }
-  return path.join(process.resourcesPath, 'libfolia_click_guard.dylib');
+  return path.join(process.resourcesPath, 'liblumamusic_click_guard.dylib');
 }
 
 function getMacWallpaperClickGuard() {
@@ -2120,7 +2122,7 @@ const mainLocale = {
     dialogImportMessage: '不能直接导入系统目录或常用用户目录。\n请选择一个专门存放音乐的文件夹。',
     dialogChooseOther: '选择其他文件夹',
     dialogCancel: '取消',
-    crashTitle: 'Folia 遇到了问题',
+    crashTitle: 'LumaMusic 遇到了问题',
     crashMessage: '程序发生了一次崩溃，日志已保存。把它发给开发者能帮助定位问题。',
     crashOpenFolder: '打开日志所在文件夹',
     crashClose: '关闭',
@@ -2146,7 +2148,7 @@ const mainLocale = {
     dialogImportMessage: '不能直接匯入系統目錄或常用使用者目錄。\n請選擇一個專門存放音樂的資料夾。',
     dialogChooseOther: '選擇其他資料夾',
     dialogCancel: '取消',
-    crashTitle: 'Folia 遇到了問題',
+    crashTitle: 'LumaMusic 遇到了問題',
     crashMessage: '程式發生了一次崩潰，日誌已儲存。把它發給開發者能幫助定位問題。',
     crashOpenFolder: '開啟日誌所在資料夾',
     crashClose: '關閉',
@@ -2172,7 +2174,7 @@ const mainLocale = {
     dialogImportMessage: 'Cannot directly import system or common user directories.\nPlease choose a dedicated music folder.',
     dialogChooseOther: 'Choose Another Folder',
     dialogCancel: 'Cancel',
-    crashTitle: 'Folia ran into a problem',
+    crashTitle: 'LumaMusic ran into a problem',
     crashMessage: 'The app crashed and a log has been saved. Sending it to the developer helps track the problem down.',
     crashOpenFolder: 'Open Log Folder',
     crashClose: 'Close',
@@ -2198,7 +2200,7 @@ const mainLocale = {
     dialogImportMessage: 'Folder sistem atau folder pengguna umum tidak dapat diimpor langsung.\nPilih folder khusus untuk menyimpan musik.',
     dialogChooseOther: 'Pilih Folder Lain',
     dialogCancel: 'Batal',
-    crashTitle: 'Folia mengalami masalah',
+    crashTitle: 'LumaMusic mengalami masalah',
     crashMessage: 'Aplikasi mengalami crash dan log telah disimpan. Mengirimkannya ke pengembang membantu menemukan masalahnya.',
     crashOpenFolder: 'Buka Folder Log',
     crashClose: 'Tutup',
@@ -2491,13 +2493,13 @@ const MOD_SYSTEM_ENABLED_SETTING_KEY = 'MOD_SYSTEM_ENABLED';
 const DEFAULT_STAGE_API_PORT = 32107;
 const DEFAULT_OBS_BROWSER_SOURCE_PORT = 32108;
 const DEFAULT_LYRIC_API_PORT = 32109;
-const FOLIA_RELEASES_URL = 'https://github.com/chthollyphile/folia-major/releases';
+const FOLIA_RELEASES_URL = 'https://github.com/QCJLchina/LumaMusic/releases';
 const FOLIA_GITHUB_REPOSITORY = {
-  owner: 'chthollyphile',
-  repo: 'folia-major',
+  owner: 'QCJLchina',
+  repo: 'LumaMusic',
 };
 const WINDOWS_APP_USER_MODEL_ID = 'top.lumamusic.v2';
-const REMOTE_CONTROL_WINDOW_TITLE = 'Folia Remote';
+const REMOTE_CONTROL_WINDOW_TITLE = 'LumaMusic Remote';
 const WINDOW_PLAYBACK_HANDOFF_REQUEST_TIMEOUT_MS = 800;
 const bundledAppIconPath = path.join(__dirname, '../build/icon.png');
 const extraResourceIconPath = path.join(process.resourcesPath, 'icon.png');
@@ -3370,7 +3372,7 @@ function refreshTrayMenu() {
   ]);
 
   appTray.setContextMenu(menu);
-  appTray.setToolTip('Folia');
+  appTray.setToolTip('LumaMusic');
 }
 
 function ensureTray() {
@@ -3793,7 +3795,7 @@ function getPackagedReleaseChannel() {
   try {
     const packageJsonPath = path.join(app.getAppPath(), 'package.json');
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-    return packageJson.foliaReleaseChannel;
+    return packageJson.lumaReleaseChannel;
   } catch {
     return null;
   }
@@ -6747,10 +6749,28 @@ ipcMain.handle('luma-audio-is-available', () => lumaAudioHost.isAvailable());
 ipcMain.handle('luma-audio-get-devices', () => lumaAudioHost.getDevices());
 ipcMain.handle('luma-audio-open', (_event, params) => lumaAudioHost.open(params));
 ipcMain.handle('luma-audio-pause', (_event, pauseVal) => lumaAudioHost.pause(pauseVal));
+ipcMain.handle('luma-audio-fade', (_event, target, seconds) => lumaAudioHost.fade(target, seconds));
+ipcMain.handle('luma-audio-fade-wait', (_event, target, seconds) => lumaAudioHost.fadeWait(target, seconds));
 ipcMain.handle('luma-audio-seek', (_event, position) => lumaAudioHost.seek(position));
 ipcMain.handle('luma-audio-stop', () => lumaAudioHost.stop());
 ipcMain.handle('luma-audio-set-volume', (_event, volume) => lumaAudioHost.setVolume(volume));
 ipcMain.handle('luma-audio-get-state', () => lumaAudioHost.getState());
+// BASS 只接受真实文件：渲染端把本地 handle、blob:、自定义协议读成字节交进来，
+// 这里落盘后引擎按绝对路径打开。文件名带内容哈希，重播同一首直接命中。
+ipcMain.handle('luma-audio-stage-local-file', async (_event, key, data) => {
+  try {
+    const safeKey = String(key || '').replace(/[^\w.-]/g, '_').slice(0, 120);
+    const dir = path.join(os.tmpdir(), 'lumamusic-luma-audio');
+    await fsp.mkdir(dir, { recursive: true });
+    const file = path.join(dir, `${safeKey}.audio`);
+    await fsp.writeFile(file, Buffer.from(data));
+    lumaAudioHost.touchStagedFile(file);
+    return { ok: true, path: file };
+  } catch (error) {
+    console.warn('[LumaAudio] staging local file failed:', error);
+    return { ok: false, error: error.message };
+  }
+});
 
 ipcMain.handle('has-local-cover-asset', async (_event, assetId) => {
   return localCoverAssetStore.has(assetId);

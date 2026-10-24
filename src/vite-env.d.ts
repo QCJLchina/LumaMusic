@@ -40,6 +40,7 @@ declare global {
     rate: number;
     channels: number;
     bits: number;
+    deviceBits?: number;
     dsd: boolean;
     mode: number;
     backend: number;
@@ -63,6 +64,8 @@ declare global {
     limit?: number;
     gainLinear?: number;
     cueStart?: number;
+    /** Fade-in time in seconds for the engine's own output stage. */
+    fadeIn?: number;
   }
 
   export interface LumaAudioApi {
@@ -70,10 +73,14 @@ declare global {
     getDevices: () => Promise<{ ok: boolean; devices: LumaAudioDevice[]; error?: string }>;
     open: (params: LumaOpenParams) => Promise<{ ok: boolean; error?: string }>;
     pause: (pauseVal: boolean) => Promise<{ ok: boolean; error?: string }>;
+    fade: (target: number, seconds: number) => Promise<{ ok: boolean; error?: string }>;
+    fadeWait: (target: number, seconds: number) => Promise<{ ok: boolean; error?: string }>;
     seek: (position: number) => Promise<{ ok: boolean; error?: string }>;
     stop: () => Promise<{ ok: boolean; error?: string }>;
     setVolume: (volume: number) => Promise<{ ok: boolean; error?: string }>;
     getState: () => Promise<{ ok: boolean; state: Partial<LumaPlaybackState>; error?: string }>;
+    /** Writes renderer-owned local audio bytes to a temp file BASS can open; returns its absolute path. */
+    stageLocalFile: (key: string, data: ArrayBuffer | Uint8Array) => Promise<{ ok: boolean; path?: string; error?: string }>;
   }
 
   interface Window {

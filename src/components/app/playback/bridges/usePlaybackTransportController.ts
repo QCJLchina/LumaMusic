@@ -6,7 +6,8 @@ import { setPlayerState } from '../../../../stores/usePlaybackStore';
 import { useTranslation } from 'react-i18next';
 import { usePlaybackStore } from '../../../../stores/usePlaybackStore';
 import { currentTime } from '../../../../stores/motionSignals';
-import { markProgrammaticPause, playbackFade, type PlaybackFadeSettleReason } from '../../../../services/playbackFade';
+import { markProgrammaticPause, playbackFade, PLAYBACK_FADE_SECONDS, type PlaybackFadeSettleReason } from '../../../../services/playbackFade';
+import { useLumaAudioStore } from '../../../../stores/useLumaAudioStore';
 import { getPlaybackSongKey } from '../../../../utils/appPlaybackGuards';
 import type { OnlineRecovery, OnlineRecoveryOptions } from '../restore/createOnlineRecoveryController';
 import type { OnlineFailure } from '../../../../services/onlineMusic/failure/onlineFailureCase';
@@ -154,6 +155,10 @@ export function usePlaybackTransportController({
             : null;
         try {
             if (typeof window !== 'undefined' && window.electron?.lumaAudio) {
+                // 引擎接管时重按播放要从静音淡回：暂停已经把它淡到 0 了。
+                if (useLumaAudioStore.getState().engineOwnsOutput) {
+                    void window.electron.lumaAudio.fade(1, PLAYBACK_FADE_SECONDS);
+                }
                 void window.electron.lumaAudio.pause(false);
             }
             await audio.play();
@@ -242,7 +247,13 @@ export function usePlaybackTransportController({
                 markProgrammaticPause(audioRef.current);
             }
             if (typeof window !== 'undefined' && window.electron?.lumaAudio) {
-                void window.electron.lumaAudio.pause(true);
+                // 引擎接管时网页那一路是静音的，淡出必须做在引擎的输出级。
+                const lumaAudio = window.electron.lumaAudio;
+                const engineOwns = useLumaAudioStore.getState().engineOwnsOutput;
+                // 必须等淡出真的走完再暂停：并发发出去，pause 会立刻切断，淡出等于没做。
+                void (engineOwns
+                    ? lumaAudio.fadeWait(0, PLAYBACK_FADE_SECONDS).then(() => lumaAudio.pause(true))
+                    : lumaAudio.pause(true));
             }
             audioRef.current.pause();
             syncOutputGain(getTargetPlaybackVolume(), 0);

@@ -1,6 +1,6 @@
-LangString foliaUserDataPrompt 1033 "Delete user data?"
-LangString foliaUserDataPrompt 2052 "是否删除用户数据？"
-LangString foliaUserDataPrompt 1057 "Hapus data pengguna?"
+LangString lumaUserDataPrompt 1033 "Delete user data?"
+LangString lumaUserDataPrompt 2052 "是否删除用户数据？"
+LangString lumaUserDataPrompt 1057 "Hapus data pengguna?"
 
 !macro customUnInstall
   ; Electron always uses per-user app data, so look under the current user's
@@ -9,12 +9,12 @@ LangString foliaUserDataPrompt 1057 "Hapus data pengguna?"
     SetShellVarContext current
   ${endif}
 
-  IfFileExists "$APPDATA\${APP_FILENAME}\*.*" 0 folia_skipUserDataPrompt
+  IfFileExists "$APPDATA\${APP_FILENAME}\*.*" 0 luma_skipUserDataPrompt
 
-  MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "$(foliaUserDataPrompt)" /SD IDNO IDYES folia_deleteUserData
-  Goto folia_skipUserDataPrompt
+  MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "$(lumaUserDataPrompt)" /SD IDNO IDYES luma_deleteUserData
+  Goto luma_skipUserDataPrompt
 
-  folia_deleteUserData:
+  luma_deleteUserData:
     RMDir /r "$APPDATA\${APP_FILENAME}"
     !ifdef APP_PRODUCT_FILENAME
       RMDir /r "$APPDATA\${APP_PRODUCT_FILENAME}"
@@ -23,7 +23,7 @@ LangString foliaUserDataPrompt 1057 "Hapus data pengguna?"
       RMDir /r "$APPDATA\${APP_PACKAGE_NAME}"
     !endif
 
-  folia_skipUserDataPrompt:
+  luma_skipUserDataPrompt:
   ${if} $installMode == "all"
     SetShellVarContext all
   ${endif}

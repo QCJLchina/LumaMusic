@@ -9,14 +9,14 @@ const noOrigin = () => {
 
 describe('parseGitHubRepo', () => {
     it('parses ssh and https GitHub remotes', () => {
-        expect(parseGitHubRepo('git@github.com:chthollyphile/folia-major.git\n')).toBe('chthollyphile/folia-major');
-        expect(parseGitHubRepo('https://github.com/someone/folia-fork')).toBe('someone/folia-fork');
-        expect(parseGitHubRepo('https://github.com/someone/folia-fork.git/')).toBe('someone/folia-fork');
+        expect(parseGitHubRepo('git@github.com:QCJLchina/LumaMusic.git\n')).toBe('QCJLchina/LumaMusic');
+        expect(parseGitHubRepo('https://github.com/someone/luma-fork')).toBe('someone/luma-fork');
+        expect(parseGitHubRepo('https://github.com/someone/luma-fork.git/')).toBe('someone/luma-fork');
     });
 
     it('rejects non-GitHub or malformed remotes', () => {
-        expect(parseGitHubRepo('https://gitlab.com/someone/folia')).toBeNull();
-        expect(parseGitHubRepo('https://evilgithub.com/someone/folia')).toBeNull();
+        expect(parseGitHubRepo('https://gitlab.com/someone/luma')).toBeNull();
+        expect(parseGitHubRepo('https://evilgithub.com/someone/luma')).toBeNull();
         expect(parseGitHubRepo('')).toBeNull();
         expect(parseGitHubRepo(undefined)).toBeNull();
     });
@@ -56,24 +56,24 @@ describe('normalizeBuildCommit', () => {
 });
 
 describe('resolveBuildKind', () => {
-    const upstreamCi = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'chthollyphile/folia-major' };
+    const officialCi = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'QCJLchina/LumaMusic' };
 
-    it('only treats GitHub Actions runs of the upstream repository as official', () => {
-        expect(resolveBuildKind(upstreamCi)).toEqual({ kind: 'official', host: null });
+    it('only treats GitHub Actions runs of the project repository as official', () => {
+        expect(resolveBuildKind(officialCi)).toEqual({ kind: 'official', host: null });
     });
 
     it('treats the documented deployments as self-hosted, including official Docker images', () => {
-        expect(resolveBuildKind({ ...upstreamCi, APP_RELEASE_CHANNEL: 'docker' })).toEqual({ kind: 'self-hosted', host: 'docker' });
+        expect(resolveBuildKind({ ...officialCi, APP_RELEASE_CHANNEL: 'docker' })).toEqual({ kind: 'self-hosted', host: 'docker' });
         expect(resolveBuildKind({ APP_RELEASE_CHANNEL: 'docker' })).toEqual({ kind: 'self-hosted', host: 'docker' });
-        expect(resolveBuildKind({ VERCEL: '1', VERCEL_GIT_REPO_OWNER: 'someone', VERCEL_GIT_REPO_SLUG: 'folia-major' })).toEqual({ kind: 'self-hosted', host: 'vercel' });
+        expect(resolveBuildKind({ VERCEL: '1', VERCEL_GIT_REPO_OWNER: 'someone', VERCEL_GIT_REPO_SLUG: 'LumaMusic' })).toEqual({ kind: 'self-hosted', host: 'vercel' });
         expect(resolveBuildKind({ CF_PAGES: '1' })).toEqual({ kind: 'self-hosted', host: 'cloudflare' });
         expect(resolveBuildKind({ WORKERS_CI: '1' })).toEqual({ kind: 'self-hosted', host: 'cloudflare' });
     });
 
     it('marks fork CI and local builds as unofficial', () => {
-        expect(resolveBuildKind({ GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'someone/folia-major' }).kind).toBe('unofficial');
-        expect(resolveBuildKind({ GITHUB_REPOSITORY: 'chthollyphile/folia-major' }).kind).toBe('unofficial');
-        expect(resolveBuildKind({ FOLIA_BUILD_REPO: 'chthollyphile/folia-major' }).kind).toBe('unofficial');
+        expect(resolveBuildKind({ GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'someone/LumaMusic' }).kind).toBe('unofficial');
+        expect(resolveBuildKind({ GITHUB_REPOSITORY: 'QCJLchina/LumaMusic' }).kind).toBe('unofficial');
+        expect(resolveBuildKind({ FOLIA_BUILD_REPO: 'QCJLchina/LumaMusic' }).kind).toBe('unofficial');
         expect(resolveBuildKind({}).kind).toBe('unofficial');
     });
 });

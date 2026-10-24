@@ -26,10 +26,10 @@ fn main() {
     match cli::parse(&args) {
         Ok(command) => run(command),
         Err(message) => {
-            eprintln!("usage: folia-wallpaper-helper attach --hwnd <n> [--forward-mouse] [--zguard]");
-            eprintln!("       folia-wallpaper-helper move --hwnd <n>");
-            eprintln!("       folia-wallpaper-helper detach --hwnd <n>");
-            eprintln!("       folia-wallpaper-helper refresh");
+            eprintln!("usage: lumamusic-wallpaper-helper attach --hwnd <n> [--forward-mouse] [--zguard]");
+            eprintln!("       lumamusic-wallpaper-helper move --hwnd <n>");
+            eprintln!("       lumamusic-wallpaper-helper detach --hwnd <n>");
+            eprintln!("       lumamusic-wallpaper-helper refresh");
             eprintln!("error: {message}");
             std::process::exit(2);
         }

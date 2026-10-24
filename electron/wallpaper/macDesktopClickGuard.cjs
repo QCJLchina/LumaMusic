@@ -1,5 +1,5 @@
 // electron/wallpaper/macDesktopClickGuard.cjs
-// Drives libfolia_click_guard.dylib (packaging/macos/desktop-click-guard/ClickGuard.swift) for the
+// Drives liblumamusic_click_guard.dylib (packaging/macos/desktop-click-guard/ClickGuard.swift) for the
 // macOS wallpaper while Stage Manager is on and the desktop icons are shown (issue #698): the
 // library keeps a click on the bare wallpaper away from Finder, so Stage Manager does not send the
 // stage aside, and leaves clicks on icons alone. Folia's own listen-only tap still forwards the

@@ -8,7 +8,7 @@ const path = require('node:path');
 // 末期才炸。这五个值是 electron-builder 的公开契约，比提升可靠。
 const ARCH_NAMES = ['ia32', 'x64', 'armv7l', 'arm64', 'universal'];
 
-const MNN_LIBRARY_FILES = { darwin: 'libfolia_mnn.dylib', linux: 'libfolia_mnn.so', win32: 'folia_mnn.dll' };
+const MNN_LIBRARY_FILES = { darwin: 'liblumamusic_mnn.dylib', linux: 'liblumamusic_mnn.so', win32: 'lumamusic_mnn.dll' };
 
 /**
  * 包里必须有分析模型的运行库（resources/mnn，build/buildMnnRuntime.mjs 在 beforePack 里编出来）。

@@ -262,7 +262,7 @@ stem 之和与元素逐样本相同"这个换手前提所要求的。
 
 ### 6.4 推理进程隔离
 
-> 现在的运行时是 MNN（`electron/analysis/mnn.cjs`，koffi 调用编进 app 的 `libfolia_mnn`），
+> 现在的运行时是 MNN（`electron/analysis/mnn.cjs`，koffi 调用编进 app 的 `liblumamusic_mnn`），
 > `run` 在 koffi 的线程上跑、真正异步；下面是上一版 onnxruntime-node 时的实测，也是模型至今仍留在
 > `utilityProcess` 里的原因。
 

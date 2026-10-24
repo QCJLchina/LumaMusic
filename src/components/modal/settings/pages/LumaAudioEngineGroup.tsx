@@ -13,6 +13,8 @@ const OPT_LUMA_BACKEND = option(SOUND_GROUP, "lumaBackend", "options.lumaBackend
 const OPT_LUMA_DEVICE = option(SOUND_GROUP, "lumaDevice", "options.lumaDevice", { electronOnly: true });
 const OPT_LUMA_DSD_MODE = option(SOUND_GROUP, "lumaDsdMode", "options.lumaDsdMode", { electronOnly: true });
 const OPT_LUMA_PCM_RATE = option(SOUND_GROUP, "lumaPcmRate", "options.lumaPcmRate", { electronOnly: true });
+const OPT_LUMA_RATE_MODE = option(SOUND_GROUP, "lumaRateMode", "options.lumaRateMode", { electronOnly: true });
+const OPT_LUMA_OUTPUT_STATE = option(SOUND_GROUP, "lumaOutputState", "options.lumaOutputState", { electronOnly: true });
 
 const LumaAudioEngineGroup: React.FC = () => {
     const { t } = useTranslation();
@@ -25,6 +27,9 @@ const LumaAudioEngineGroup: React.FC = () => {
         activeDeviceName: state.activeDeviceName,
         dsdMode: state.dsdMode,
         pcmRate: state.pcmRate,
+        rateMode: state.rateMode,
+        playbackState: state.playbackState,
+        openError: state.openError,
         init: state.init,
         refreshDevices: state.refreshDevices,
         setEngineEnabled: state.setEngineEnabled,
@@ -32,6 +37,7 @@ const LumaAudioEngineGroup: React.FC = () => {
         setDevice: state.setDevice,
         setDsdMode: state.setDsdMode,
         setPcmRate: state.setPcmRate,
+        setRateMode: state.setRateMode,
     })));
 
     useEffect(() => {
@@ -47,6 +53,20 @@ const LumaAudioEngineGroup: React.FC = () => {
     const deviceOptions = backendDevices.length > 0
         ? backendDevices.map(device => ({ value: String(device.index), label: device.name }))
         : [{ value: String(luma.activeDeviceIndex), label: luma.activeDeviceName || t("options.audioOutputDefault") }];
+    const formatRate = (rate: number) => `${(rate / 1000).toFixed(rate % 1000 === 0 ? 0 : 1)} kHz`;
+    const backendName = luma.playbackState.backend === 0
+        ? t("options.lumaBackendShared")
+        : luma.playbackState.backend === 1
+            ? t("options.lumaBackendExclusive")
+            : luma.playbackState.backend === 2 ? "ASIO" : "";
+    const outputBits = luma.playbackState.deviceBits ? ` · ${luma.playbackState.deviceBits} bit` : "";
+    const outputState = luma.playbackState.rate && backendName
+        ? `${backendName} · ${formatRate(luma.playbackState.rate)}${outputBits}`
+        : luma.openError
+            ? t("options.lumaOutputFailed")
+            : luma.playbackState.backend === undefined
+                ? t("options.lumaOutputIdle")
+                : "—";
 
     return (
         <>
@@ -64,8 +84,9 @@ const LumaAudioEngineGroup: React.FC = () => {
                                 { value: "2", label: t("options.lumaBackendAsio") },
                             ]}
                             onChange={value => {
-                                luma.setBackend(Number(value));
-                                void luma.refreshDevices();
+                                void luma.setBackend(Number(value)).catch(error => {
+                                    console.warn('[LumaAudio] backend switch failed:', error);
+                                });
                             }}
                         />
                     </Row>
@@ -80,7 +101,12 @@ const LumaAudioEngineGroup: React.FC = () => {
                             onOpen={() => void luma.refreshDevices()}
                         />
                     </Row>
-                    <Row sub option={OPT_LUMA_DSD_MODE}>
+                    <Row
+                        sub
+                        option={OPT_LUMA_DSD_MODE}
+                        // 原生 DSD 是 BASS 的硬约束：必须走 ASIO 厂商驱动，WASAPI 上只有 DoP。
+                        hint={luma.dsdMode === 2 && luma.backend !== 2 ? t("options.lumaDsdNativeNeedsAsio") : undefined}
+                    >
                         <Segmented
                             value={String(luma.dsdMode)}
                             options={[
@@ -91,6 +117,18 @@ const LumaAudioEngineGroup: React.FC = () => {
                             onChange={value => luma.setDsdMode(Number(value))}
                         />
                     </Row>
+                    {luma.backend !== 0 && luma.dsdMode === 0 && (
+                        <Row sub option={OPT_LUMA_RATE_MODE}>
+                            <Segmented
+                                value={String(luma.rateMode)}
+                                options={[
+                                    { value: "0", label: t("options.lumaRateFollowSource") },
+                                    { value: "1", label: t("options.lumaRateBySetting") },
+                                ]}
+                                onChange={value => luma.setRateMode(Number(value))}
+                            />
+                        </Row>
+                    )}
                     {luma.dsdMode === 0 && (
                         <Row sub option={OPT_LUMA_PCM_RATE}>
                             <Select
@@ -101,12 +139,17 @@ const LumaAudioEngineGroup: React.FC = () => {
                                     { value: "88200", label: "88.2 kHz" },
                                     { value: "96000", label: "96 kHz" },
                                     { value: "176400", label: "176.4 kHz" },
+                                    { value: "192000", label: "192 kHz" },
                                     { value: "352800", label: "352.8 kHz" },
+                                    { value: "384000", label: "384 kHz" },
                                 ]}
                                 onChange={value => luma.setPcmRate(Number(value))}
                             />
                         </Row>
                     )}
+                    <Row sub option={OPT_LUMA_OUTPUT_STATE} hint={luma.openError}>
+                        <span className="text-sm text-[color:var(--st-t2)]">{outputState}</span>
+                    </Row>
                 </>
             )}
         </>

@@ -9,6 +9,7 @@ import { canAnalyseTracks } from '../../../../services/automix/transitionStrateg
 import { useAudioSettingsStore } from '../../../../stores/useAudioSettingsStore';
 import { useAutomixSettingsStore } from '../../../../stores/useAutomixSettingsStore';
 import { useDesktopSettingsStore } from '../../../../stores/useDesktopSettingsStore';
+import { useLumaAudioStore } from '../../../../stores/useLumaAudioStore';
 import { runsOnWindows } from '../../../../utils/platform';
 import { Button, Chips, Group, Reveal, Row, Segmented, Slider, Status, Toggle, option, type SettingsGroupDef, type SettingsOptionDef } from '../kit';
 import AudioOutputDeviceRow from './AudioOutputDeviceRow';
@@ -57,6 +58,7 @@ const PlaybackPage: React.FC = () => {
     const { isElectron, viewProps } = useSettingsPage();
     const { replayGainMode, onReplayGainModeChange, onAudioOutputDeviceChange } = viewProps.playback;
     const { voiceInputPause } = viewProps.lab;
+    const engineOwnsOutput = useLumaAudioStore(state => state.engineOwnsOutput);
     const automix = useAutomixSettingsStore(useShallow(state => ({
         enabled: state.automixEnabled,
         mode: state.transitionMode,
@@ -191,7 +193,11 @@ const PlaybackPage: React.FC = () => {
 
             <Group def={SOUND}>
                 {isElectron && <LumaAudioEngineGroup />}
-                <AudioOutputDeviceRow option={O.outputDevice} onDeviceChange={onAudioOutputDeviceChange} />
+                <AudioOutputDeviceRow
+                    option={O.outputDevice}
+                    onDeviceChange={onAudioOutputDeviceChange}
+                    engineOwnsOutput={engineOwnsOutput}
+                />
                 <Row option={O.replayGain} note={t('options.replayGainModeDesc')}>
                     <Segmented
                         value={replayGainMode}

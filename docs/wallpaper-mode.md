@@ -10,7 +10,7 @@ Folia 渲染为桌面歌词壁纸，窗口常驻桌面最底层。三平台各�
 
 | 平台 | 承接方式 | 切换/启动方式 | 附加进程/二进制 |
 | --- | --- | --- | --- |
-| Windows | `SetParent` 挂入图标层之下的 WorkerW 层 | **不重启进程**，开关模式时重建窗口 | `folia-wallpaper-helper.exe`（Rust 常驻） |
+| Windows | `SetParent` 挂入图标层之下的 WorkerW 层 | **不重启进程**，开关模式时重建窗口 | `lumamusic-wallpaper-helper.exe`（Rust 常驻） |
 | Linux | Wayland：`windowtolayer` → `wlr-layer-shell` bottom；X11：`_NET_WM_WINDOW_TYPE_DESKTOP` | **relaunch**：跳板进程经 `windowtolayer` 包装后重启 Folia | `windowtolayer`（随 Linux 包分发） |
 | macOS | 无边框窗口原地沉到 `kCGDesktopIconWindowLevelKey - 1` | **原地切换**：不 relaunch、无 helper；通常不重建窗口，仅当窗口曾被 Electron `setAlwaysOnTop` 碰过时进入前重建一次 | 无（koffi FFI） |
 
@@ -72,7 +72,7 @@ Electron 主进程 (main.cjs)，下面三个文件在 electron/wallpaper/
   ├─ windowsWallpaperTarget.cjs          目标显示器判定（设置里选的屏，没选就是主窗口所在屏）
   ├─ windowsWallpaperMouse.cjs           helper 物理坐标 → Chromium DIP → sendInputEvent
   └─ windowsWallpaperController.cjs      spawn/心跳看门狗/重挂调度/crash-loop breaker
-       └─ folia-wallpaper-helper.exe     Rust 常驻进程（packaging/windows/wallpaper-helper/）
+       └─ lumamusic-wallpaper-helper.exe Rust 常驻进程（packaging/windows/wallpaper-helper/）
             ├─ attach.rs        WorkerW 双探测（classic + 24H2 raised）→ SetParent + 目标屏几何
             ├─ mouse_forward.rs Raw Input → JSONL 鼠标/滚轮事件（物理像素、前台过滤）
             └─ monitor.rs       WinEvent + TaskbarCreated → 自动重挂 / z 序守卫 / 心跳
@@ -96,7 +96,7 @@ Electron 主进程 (main.cjs)，下面三个文件在 electron/wallpaper/
 
 ### 3. 主进程接入（`electron/main.cjs` + `electron/wallpaper/windowsWallpaperController.cjs`）
 
-- `resolveWallpaperHelperPath()`：`FOLIA_WALLPAPER_HELPER_PATH` 覆盖 → `resources/folia-wallpaper-helper.exe`；缺失时禁用壁纸模式并通知渲染端。
+- `resolveWallpaperHelperPath()`：`FOLIA_WALLPAPER_HELPER_PATH` 覆盖 → `resources/lumamusic-wallpaper-helper.exe`；缺失时禁用壁纸模式并通知渲染端。
 - 控制器状态机：spawn → 心跳看门狗（5s/15s 超时）→ 异常退出重挂（2s 退避）→ 连续 3 次失败降级（清 `wallpaper_mode`、原位还原普通窗口，不重启进程）。要点：**主动 detach 后的 helper 退出不得触发重挂**（否则关闭模式后新窗口被僵尸重挂拖回 WorkerW 层）；迟到 exit 事件以 `helperProcess === child` 判定归属（否则 kill+attach 竞态会在同一 hwnd 上挂两个 helper、鼠标双份注入）；`attach()` 在 `wallpaper_mode=false` 时拒绝启动；**从未 attached 的早夭/心跳挂死会话同样计入降级**（否则损坏的 helper 秒退会无限 2s respawn）；失败计数持久化 `wallpaper_windows_failure_count`，健康 60s 清零。
 - `error.kind === "window-destroyed"` → 走窗口重建而非普通重挂；renderer 崩溃 → 原地 reload；窗口随 WorkerW 连带销毁时 `window-all-closed` 同样触发重建（`isAppQuitting` 区分）。helper 的鼠标转发注册失败是致命契约（发 error 后立即退出——其下方图标层使壁纸页收不到任何真实系统输入，无鼠标的壁纸页不可交互），反复失败由降级闩锁关闭壁纸模式。
 - `display-metrics-changed` 按平台（win32）注册、回调内判模式——不能挂在启动时的 `isWindowsWallpaperMode()` 分支：Windows 开关模式不重启进程，运行时开启后监听必须仍在。
@@ -113,7 +113,7 @@ Electron 主进程 (main.cjs)，下面三个文件在 electron/wallpaper/
 ### 4. 渲染端 / 构建
 
 - 设置卡片 Linux/Windows 同样式（单开关）；命令面板 `desktop-toggle-wallpaper-mode`（platform `'win'`）；三语文案。
-- `npm run build:wallpaper-helper` → `build/folia-wallpaper-helper.exe`（非 Windows no-op）；electron-builder `win.extraResources` 单独打包；CI windows-latest 装 Rust + cargo 缓存。
+- `npm run build:wallpaper-helper` → `build/lumamusic-wallpaper-helper.exe`（非 Windows no-op）；electron-builder `win.extraResources` 单独打包；CI windows-latest 装 Rust + cargo 缓存。
 - 前端构建必须在 `ELECTRON=true` 下运行（base 变 `./`），否则 file:// 加载 404。
 
 ### 5. 已知局限
@@ -184,7 +184,7 @@ Electron 主进程 (main.cjs)，下面三个文件在 electron/wallpaper/
   - 盖得到的：底部胶囊、右下角面板开关和展开的面板、播放提示卡片。盖不到的：只有播放页登记了这份布局，主页没有；左上角返回按钮；monet / pendolo 点歌词行跳转。点这些地方仍然转发，只是台前调度照常反应。
   - 台前调度开着时，只盖控件不够：歌词、空白处、控件设成始终隐藏时的整张壁纸，点下去都还是点在 Finder 桌面上。按台前调度的设置（`com.apple.WindowManager` 的 `GloballyEnabled` / `HideDesktop`，`readStageManagerDesktop` 经 CFPreferences 读，不起子进程）分两种：
     - **台前调度中隐藏桌面项目**：桌面上没有图标可点，一个面板盖住整张壁纸，不需要任何权限。代价：点壁纸不再是「显示桌面」，右键也不再出 Finder 的桌面菜单。
-    - **显示桌面图标**：加载 `libfolia_click_guard.dylib`（`packaging/macos/desktop-click-guard/ClickGuard.swift`，由 `electron/wallpaper/macDesktopClickGuard.cjs` 通过 koffi 载入 Folia 主进程）。它在自己的原生线程上挂一个排在会话最后的 active tap：左键手势（按下、拖动、抬起一起）从壁纸范围内的裸桌面开始时吞掉，Finder 收不到，台前调度不反应（macOS 15.3 实测：吞掉的点击不收走窗口，没吞的照常收走）。点在桌面图标或图标名字上（访达辅助功能树里的 `AXImage`，后台每 12 秒刷新，按下时缓存没命中再即时问一次）、任何窗口上、壁纸外、右键和 Ctrl+点击（触控板的辅助点按，桌面菜单照常弹出），都放行。程序坞在窗口列表里任何状态下都是一整块铺满屏幕的层，分不出图标栏在哪，所以判成裸桌面后再问一次程序坞自己的辅助功能树，点在程序坞上就放行（实测：不问时点程序坞图标会被吞）；Folia 自己全屏展示时的壁纸窗口不算遮挡（与控制器的 `isDesktopPoint` 同一规则）。Folia 自己的 listen-only tap 排在它前面，照样看到并转发这次点击。判断全在原生代码里，点击路径上没有 JavaScript；查不到或超时一律放行；读访达数据只做检查过的类型转换，不会在 Folia 进程里崩溃。为什么不用单独进程：macOS 按子进程自己的身份判断辅助功能权限，Folia 已授权、它派生的 helper 仍然不被信任（实测）；载入主进程后用的就是 Folia 自己那一项。需要「辅助功能」权限；没有时只盖控件，提示一次并弹系统授权框（问过一次就记进设置，之后不再弹），不关壁纸模式；运行中刚授权时 macOS 可能要等 Folia 重启才放行 tap，提示里写了重启。已知：拖桌面图标时，Folia 的 listen-only tap 仍会把这次拖动转发进壁纸（新版 macOS 的图标不是独立窗口，转发判断分不出图标和空白），与本修复无关，暂不处理。代价：在裸桌面上拉框多选会被吞掉。对比 PR #709：那版在 koffi worker 里挂 tap 并回调 JavaScript 判断，所有 Mac 用户都要授权，只吞按下抬起不吞拖动，退出不关 tap。
+    - **显示桌面图标**：加载 `liblumamusic_click_guard.dylib`（`packaging/macos/desktop-click-guard/ClickGuard.swift`，由 `electron/wallpaper/macDesktopClickGuard.cjs` 通过 koffi 载入 LumaMusic 主进程）。它在自己的原生线程上挂一个排在会话最后的 active tap：左键手势（按下、拖动、抬起一起）从壁纸范围内的裸桌面开始时吞掉，Finder 收不到，台前调度不反应（macOS 15.3 实测：吞掉的点击不收走窗口，没吞的照常收走）。点在桌面图标或图标名字上（访达辅助功能树里的 `AXImage`，后台每 12 秒刷新，按下时缓存没命中再即时问一次）、任何窗口上、壁纸外、右键和 Ctrl+点击（触控板的辅助点按，桌面菜单照常弹出），都放行。程序坞在窗口列表里任何状态下都是一整块铺满屏幕的层，分不出图标栏在哪，所以判成裸桌面后再问一次程序坞自己的辅助功能树，点在程序坞上就放行（实测：不问时点程序坞图标会被吞）；LumaMusic 自己全屏展示时的壁纸窗口不算遮挡（与控制器的 `isDesktopPoint` 同一规则）。LumaMusic 自己的 listen-only tap 排在它前面，照样看到并转发这次点击。判断全在原生代码里，点击路径上没有 JavaScript；查不到或超时一律放行；读访达数据只做检查过的类型转换，不会在 LumaMusic 进程里崩溃。为什么不用单独进程：macOS 按子进程自己的身份判断辅助功能权限，LumaMusic 已授权、它派生的 helper 仍然不被信任（实测）；载入主进程后用的就是 LumaMusic 自己那一项。需要「辅助功能」权限；没有时只盖控件，提示一次并弹系统授权框（问过一次就记进设置，之后不再弹），不关壁纸模式；运行中刚授权时 macOS 可能要等 LumaMusic 重启才放行 tap，提示里写了重启。已知：拖桌面图标时，LumaMusic 的 listen-only tap 仍会把这次拖动转发进壁纸（新版 macOS 的图标不是独立窗口，转发判断分不出图标和空白），与本修复无关，暂不处理。代价：在裸桌面上拉框多选会被吞掉。对比 PR #709：那版在 koffi worker 里挂 tap 并回调 JavaScript 判断，所有 Mac 用户都要授权，只吞按下抬起不吞拖动，退出不关 tap。
     - 设置和权限在壁纸接收输入期间每 3 秒重读一次，改了不用重启。桌面小组件没有实测。
   - 什么时候在：只在 tap 运行时存在（面板把点击从 Finder 那里拿走，只有 tap 会把它交给壁纸；没有 tap 时面板会让控件点不动）。控件自动隐藏后面板跟着撤掉，下面的桌面图标照常能点；控件显示期间，被盖住的图标点不到。退出壁纸模式时收起，退出应用时释放。
 - **键盘不转发**：与 Windows 交互边界一致，壁纸模式下键盘不可达；退出/控制走托盘等入口。

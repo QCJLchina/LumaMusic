@@ -29,8 +29,8 @@ dist-ssr
 dev-dist/
 example/
 release/
-packaging/aur/folia-major-bin/FIRST_RELEASE.md
-packaging/aur/folia-major-bin/README.md
+packaging/aur/lumamusic-bin/FIRST_RELEASE.md
+packaging/aur/lumamusic-bin/README.md
 .codex
 .codex-tmp
 .wrangler/tmp
@@ -84,7 +84,7 @@ mods/*.zip
 
 
 # Built by packaging/windows/build-wallpaper-helper.mjs (Windows wallpaper mode helper).
-build/folia-wallpaper-helper.exe
+build/lumamusic-wallpaper-helper.exe
 packaging/windows/wallpaper-helper/target/
 
 # Local Rust Spout sender build artifacts.
@@ -96,3 +96,6 @@ __pycache__/
 
 # Built by build/buildPythonRuntime.mjs - binary artifacts that live on the mirrors, not in git.
 dist-runtime/
+
+# Local npm cache created by sandboxed installs
+.npm-cache/

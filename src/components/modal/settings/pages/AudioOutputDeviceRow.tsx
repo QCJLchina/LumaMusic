@@ -18,9 +18,14 @@ type AudioOutputDeviceRowProps = {
     option: SettingsOptionDef;
     /** Switches the player's output; false when the device could not be used. */
     onDeviceChange: (deviceId: string) => Promise<boolean> | boolean;
+    /**
+     * True while the native engine owns the output. This row lists Chromium's own sinks, which
+     * are silent in that case: the engine picks its device from the "输出设备" row above.
+     */
+    engineOwnsOutput?: boolean;
 };
 
-const AudioOutputDeviceRow: React.FC<AudioOutputDeviceRowProps> = ({ option, onDeviceChange }) => {
+const AudioOutputDeviceRow: React.FC<AudioOutputDeviceRowProps> = ({ option, onDeviceChange, engineOwnsOutput = false }) => {
     const { t } = useTranslation();
     const deviceId = useAudioSettingsStore(state => state.audioOutputDeviceId);
     const { devices, ensureLoaded, errorKey, hasLoaded, isLoading, isSupported, refresh, selectedDeviceLabel, setErrorKey } = useAudioOutputDevices(deviceId);
@@ -67,7 +72,9 @@ const AudioOutputDeviceRow: React.FC<AudioOutputDeviceRowProps> = ({ option, onD
         options.push({ value: deviceId, label: selectedDeviceLabel || t('options.audioOutputUnnamed') });
     }
 
-    const state = !isSupported
+    const state = engineOwnsOutput
+        ? t('options.audioOutputEnginePreviewOnly')
+        : !isSupported
         ? t('options.audioOutputUnsupported')
         : errorKey
             ? t(errorKey)
@@ -80,7 +87,7 @@ const AudioOutputDeviceRow: React.FC<AudioOutputDeviceRowProps> = ({ option, onD
                         : undefined;
 
     return (
-        <Row option={option} hint={state} disabled={!isSupported}>
+        <Row option={option} hint={state} disabled={!isSupported || engineOwnsOutput}>
             <Button icon={RefreshCw} tip={t('options.audioOutputRefresh')} onClick={() => void refresh()} disabled={isLoading || isSelecting} />
             <Select value={deviceId} options={options} onChange={next => void selectDevice(next)} onOpen={ensureLoaded} disabled={isSelecting} />
         </Row>

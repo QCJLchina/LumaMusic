@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 //
 //   node build/buildMnnRuntime.mjs [platform] [arch]      (defaults: this machine)
 //
-// Output: build/mnn/<mac|win|linux>-<arch>/<libfolia_mnn.dylib | folia_mnn.dll | libfolia_mnn.so>,
+// Output: build/mnn/<mac|win|linux>-<arch>/<liblumamusic_mnn.dylib | lumamusic_mnn.dll | liblumamusic_mnn.so>,
 // shipped as resources/mnn by package.json's extraResources - the same layout build/ffmpeg uses.
 //
 // MNN comes from source at one pinned commit, fetched with git (whose object ids are the integrity
@@ -35,7 +35,7 @@ export const MNN_COMMIT = 'd407447ed56c4121a11ccbd266dc184ca1ead0c2';
 const MNN_REMOTE = 'https://github.com/alibaba/MNN.git';
 
 const OS_NAMES = Object.freeze({ darwin: 'mac', linux: 'linux', win32: 'win' });
-const LIBRARY_FILES = Object.freeze({ darwin: 'libfolia_mnn.dylib', linux: 'libfolia_mnn.so', win32: 'folia_mnn.dll' });
+const LIBRARY_FILES = Object.freeze({ darwin: 'liblumamusic_mnn.dylib', linux: 'liblumamusic_mnn.so', win32: 'lumamusic_mnn.dll' });
 const OSX_ARCHS = Object.freeze({ x64: 'x86_64', arm64: 'arm64' });
 /** Electron 43's own floor. */
 const MACOS_DEPLOYMENT_TARGET = '12.0';

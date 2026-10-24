@@ -11,7 +11,7 @@ import { useSettingsPage } from './settingsPageContext';
 // itself can do with it: download it, show how far the download has come, restart to install. It
 // unfolds once the update check has found a version.
 
-const AUR_PACKAGE_URL = 'https://aur.archlinux.org/packages/folia-major-bin';
+const AUR_PACKAGE_URL = 'https://aur.archlinux.org/packages/lumamusic-bin';
 
 type FoundUpdateRowProps = {
     /** Under the row above it: indented. */

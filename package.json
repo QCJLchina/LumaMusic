@@ -1,14 +1,11 @@
 {
   "name": "lumamusic",
   "productName": "LumaMusic",
-  "desktopName": "folia-major.desktop",
+  "desktopName": "lumamusic.desktop",
   "description": "LumaMusic v2 - High Performance Bit-Perfect Audio Player",
-  "author": {
-    "name": "chthollyphile",
-    "email": "chthollyphile@users.noreply.github.com"
-  },
+  "author": "QCJLchina",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "license": "AGPL-3.0",
   "type": "module",
   "main": "electron/main.cjs",
@@ -45,13 +42,13 @@
     "manual:lattice-cover-memory": "node test/manual/lattice-cover-memory.mjs",
     "manual:bravais-perf": "node test/manual/bravais-perf-probe.mjs",
     "stage:client": "vite --open /stage-client.html",
-    "dev:electron": "cross-env ELECTRON_DEV=true FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer FOLIA_WALLPAPER_HELPER_PATH=build/folia-wallpaper-helper.exe concurrently -k \"vite\" \"wait-on tcp:3000 && electron .\"",
-    "dev:electron:update-preview": "cross-env ELECTRON_DEV=true FOLIA_DEV_UPDATE_PREVIEW=true FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer FOLIA_WALLPAPER_HELPER_PATH=build/folia-wallpaper-helper.exe concurrently -k \"vite\" \"wait-on tcp:3000 && electron .\"",
+    "dev:electron": "cross-env ELECTRON_DEV=true FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer FOLIA_WALLPAPER_HELPER_PATH=build/lumamusic-wallpaper-helper.exe concurrently -k \"vite\" \"wait-on tcp:3000 && electron .\"",
+    "dev:electron:update-preview": "cross-env ELECTRON_DEV=true FOLIA_DEV_UPDATE_PREVIEW=true FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer FOLIA_WALLPAPER_HELPER_PATH=build/lumamusic-wallpaper-helper.exe concurrently -k \"vite\" \"wait-on tcp:3000 && electron .\"",
     "dev:electron:wallpaper": "npm run build:windowtolayer && npm run build:wallpaper-helper && npm run dev:electron",
     "dev:electron:dist": "cross-env ELECTRON_DEV=false ELECTRON=true ELECTRON_LINUX_PACKAGED_GRAPHICS=true FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer vite build && electron .",
     "dev:electron:dist:sourcemap": "cross-env-shell ELECTRON_DEV=false ELECTRON=true NODE_OPTIONS=--enable-source-maps FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer \"vite build --sourcemap && electron .\"",
-    "dev:electron:dist:swiftshader": "cross-env ELECTRON_DEV=false ELECTRON=true ELECTRON_LINUX_PACKAGED_GRAPHICS=true FOLIA_LINUX_GRAPHICS_MODE=swiftshader FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer vite build && electron .",
-    "dev:electron:dist:software": "cross-env ELECTRON_DEV=false ELECTRON=true ELECTRON_LINUX_PACKAGED_GRAPHICS=true FOLIA_LINUX_GRAPHICS_MODE=software FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer vite build && electron .",
+    "dev:electron:dist:swiftshader": "cross-env ELECTRON_DEV=false ELECTRON=true ELECTRON_LINUX_PACKAGED_GRAPHICS=true LUMA_LINUX_GRAPHICS_MODE=swiftshader FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer vite build && electron .",
+    "dev:electron:dist:software": "cross-env ELECTRON_DEV=false ELECTRON=true ELECTRON_LINUX_PACKAGED_GRAPHICS=true LUMA_LINUX_GRAPHICS_MODE=software FOLIA_WINDOWTOLAYER_PATH=build/windowtolayer vite build && electron .",
     "build:electron:dir": "cross-env ELECTRON_DEV=false ELECTRON=true vite build && npm run build:windowtolayer && npm run build:wallpaper-helper && electron-builder --linux dir",
     "build:electron": "cross-env ELECTRON_DEV=false ELECTRON=true vite build && npm run build:windowtolayer && npm run build:wallpaper-helper && electron-builder",
     "build:windowtolayer": "node packaging/linux/build-windowtolayer.mjs",
@@ -79,8 +76,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "chthollyphile",
-        "repo": "folia-major"
+        "owner": "QCJLchina",
+        "repo": "LumaMusic"
       }
     ],
     "files": [
@@ -112,7 +109,7 @@
         "from": "build/mnn/${os}-${arch}",
         "to": "mnn",
         "filter": [
-          "*folia_mnn.*"
+          "*lumamusic_mnn.*"
         ]
       },
       {
@@ -140,8 +137,8 @@
         "to": "trayTemplate@2x.png"
       },
       {
-        "from": "packaging/linux/folia-major.desktop",
-        "to": "linux/folia-major.desktop"
+        "from": "packaging/linux/lumamusic.desktop",
+        "to": "linux/lumamusic.desktop"
       },
       {
         "from": "packaging/linux/README-LINUX.txt",
@@ -197,7 +194,7 @@
           "from": "build",
           "to": ".",
           "filter": [
-            "folia-wallpaper-helper.exe"
+            "lumamusic-wallpaper-helper.exe"
           ]
         }
       ]
@@ -225,11 +222,11 @@
       },
       "icon": "build/icon.png",
       "category": "AudioVideo",
-      "executableName": "folia-major",
+      "executableName": "lumamusic",
       "syncDesktopName": true,
       "desktop": {
         "entry": {
-          "StartupWMClass": "folia-major"
+          "StartupWMClass": "lumamusic"
         }
       }
     }

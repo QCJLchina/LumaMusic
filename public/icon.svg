@@ -23,8 +23,12 @@
     <filter id="luma_glow" x="-40%" y="-40%" width="180%" height="180%">
       <feGaussianBlur stdDeviation="18"/>
     </filter>
+    <clipPath id="luma_tile">
+      <rect x="24" y="24" width="464" height="464" rx="112" />
+    </clipPath>
   </defs>
 
+  <g clip-path="url(#luma_tile)">
   <!-- Deep ink tile: the dark field the light mark is drawn on. -->
   <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#luma_base)"/>
   <rect x="27" y="27" width="458" height="458" rx="109" stroke="url(#luma_rim)" stroke-width="6"/>
@@ -45,4 +49,5 @@
 
   <!-- A quiet highlight keeps the letter from reading as a flat silhouette. -->
   <path d="M172 126C172 121.58 175.58 118 180 118H198" stroke="#FFFFFF" stroke-opacity="0.5" stroke-width="5" stroke-linecap="round"/>
+  </g>
 </svg>

@@ -1,5 +1,5 @@
 // packaging/macos/desktop-click-guard/ClickGuard.swift
-// libfolia_click_guard.dylib: macOS wallpaper mode with Stage Manager on (issue #698).
+// liblumamusic_click_guard.dylib: macOS wallpaper mode with Stage Manager on (issue #698).
 //
 // Folia's wallpaper sits below the Finder icons, so a click on it is a click on Finder's desktop,
 // and with Stage Manager on that sends the stage aside. Folia's own listen-only tap still forwards

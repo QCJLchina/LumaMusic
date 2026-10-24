@@ -1,5 +1,5 @@
 // electron/wallpaper/windowsWallpaperController.cjs
-// Windows desktop wallpaper mode: spawn/manage the folia-wallpaper-helper.exe process that
+// Windows desktop wallpaper mode: spawn/manage the lumamusic-wallpaper-helper.exe process that
 // parents the main window into the WorkerW layer.
 //
 // Unlike the Linux wallpaper mode there is no process relaunch involved: attach/detach are

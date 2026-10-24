@@ -1,5 +1,5 @@
 // electron/linuxVulkan.cjs
-// Whether the Linux build turns Chromium's Vulkan feature on (FOLIA_LINUX_VULKAN=1, issue #752).
+// Whether the Linux build turns Chromium's Vulkan feature on (LUMA_LINUX_VULKAN=1, issue #752).
 // On the X11 backend Chromium leaves Vulkan off, and WebGPU then finds no adapter at all, so the
 // smart beat effects never run. On the native Wayland backend the opposite holds: WebGPU works
 // without Vulkan, and turning it on makes Chromium log "'--ozone-platform=wayland' is not compatible
@@ -17,7 +17,7 @@ function resolveLinuxVulkanChoice({
   ozonePlatform = '',
   graphicsMode = 'system',
 } = {}) {
-  if (platform !== 'linux' || env.FOLIA_LINUX_VULKAN !== '1') {
+  if (platform !== 'linux' || env.LUMA_LINUX_VULKAN !== '1') {
     return { enabled: false, refused: null, ozonePlatform: null };
   }
 
@@ -35,11 +35,11 @@ function resolveLinuxVulkanChoice({
 /** Records the decision when the user asked for Vulkan; stays quiet otherwise. */
 function logLinuxVulkanChoice(choice, graphicsMode) {
   if (choice.enabled) {
-    console.info('[LinuxGraphics] Vulkan enabled by FOLIA_LINUX_VULKAN=1 on the x11 backend');
+    console.info('[LinuxGraphics] Vulkan enabled by LUMA_LINUX_VULKAN=1 on the x11 backend');
   } else if (choice.refused === 'graphics-mode') {
-    console.warn(`[LinuxGraphics] FOLIA_LINUX_VULKAN=1 ignored: graphics mode is ${graphicsMode}, not system`);
+    console.warn(`[LinuxGraphics] LUMA_LINUX_VULKAN=1 ignored: graphics mode is ${graphicsMode}, not system`);
   } else if (choice.refused === 'not-x11') {
-    console.warn(`[LinuxGraphics] FOLIA_LINUX_VULKAN=1 ignored: backend is ${choice.ozonePlatform}, Vulkan only works on x11 (--ozone-platform=x11)`);
+    console.warn(`[LinuxGraphics] LUMA_LINUX_VULKAN=1 ignored: backend is ${choice.ozonePlatform}, Vulkan only works on x11 (--ozone-platform=x11)`);
   }
 }
 

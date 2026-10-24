@@ -1,5 +1,5 @@
 # native/folia-mnn/CMakeLists.txt
-# One shared library per platform - libfolia_mnn.dylib / folia_mnn.dll / libfolia_mnn.so - with MNN
+# One shared library per platform - liblumamusic_mnn.dylib / lumamusic_mnn.dll / liblumamusic_mnn.so - with MNN
 # compiled in from the pinned source build/buildMnnRuntime.mjs fetches, CPU only. See folia_mnn.cpp.
 cmake_minimum_required(VERSION 3.24)
 project(folia_mnn CXX C)
@@ -58,6 +58,7 @@ if(FOLIA_ARCH MATCHES "x86_64|amd64|x64")
     endif()
 endif()
 set_target_properties(folia_mnn PROPERTIES
+    OUTPUT_NAME lumamusic_mnn
     CXX_STANDARD 17
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON)

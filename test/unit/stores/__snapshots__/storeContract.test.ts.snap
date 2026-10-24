@@ -91,6 +91,7 @@ exports[`store contract > keeps every localStorage key the stores read or write 
   "luma_dsd_mode",
   "luma_engine_enabled",
   "luma_pcm_rate",
+  "luma_rate_mode",
   "lumiere_tuning",
   "lyrics_custom_font",
   "lyrics_filter_enabled",

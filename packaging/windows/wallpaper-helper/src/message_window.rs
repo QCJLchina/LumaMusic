@@ -43,7 +43,7 @@ pub unsafe fn create() -> Result<(), String> {
     let wnd_class = WNDCLASSA {
         lpfnWndProc: Some(window_proc),
         hInstance: h_instance.into(),
-        lpszClassName: s!("FoliaWallpaperHelperWindow"),
+        lpszClassName: s!("LumaMusicWallpaperHelperWindow"),
         ..WNDCLASSA::default()
     };
     RegisterClassA(&wnd_class);
@@ -52,7 +52,7 @@ pub unsafe fn create() -> Result<(), String> {
     let hwnd = CreateWindowExA(
         Default::default(),
         wnd_class.lpszClassName,
-        s!("FoliaWallpaperHelper"),
+        s!("LumaMusicWallpaperHelper"),
         WINDOW_STYLE::default(),
         0,
         0,

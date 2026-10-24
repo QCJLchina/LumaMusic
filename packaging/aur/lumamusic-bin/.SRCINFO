@@ -1,0 +1,22 @@
+pkgbase = lumamusic-bin
+	pkgdesc = High Performance Bit-Perfect Audio Player
+	pkgver = 2.0.0
+	pkgrel = 1
+	url = https://github.com/QCJLchina/LumaMusic
+	arch = x86_64
+	license = AGPL
+	depends = alsa-lib
+	depends = gtk3
+	depends = libxss
+	depends = nss
+	optdepends = xdg-utils: desktop integration helpers
+	provides = lumamusic
+	conflicts = lumamusic
+	source = https://github.com/QCJLchina/LumaMusic/releases/download/v2.0.0/lumamusic-2.0.0-linux-x64.tar.gz
+	source = lumamusic.desktop
+	source = lumamusic.png
+	sha256sums = SKIP
+	sha256sums = db708abbe801789e41794d8bca80a4655a8c191562c0715e20c87e097cf829d2
+	sha256sums = 1038fdb8bd45e9672daf2f2528b9d30c7aacba8c199f2f4d86b6c9646eabc7df
+
+pkgname = lumamusic-bin

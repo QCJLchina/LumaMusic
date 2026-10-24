@@ -261,7 +261,7 @@ unsafe fn detect_worker_for_monitor(monitor: HMONITOR) -> Option<WorkerCandidate
 /// and looping forever (Seelen UI trap fix).
 pub unsafe fn attach_window(hwnd: HWND) -> Result<(HWND, AttachMode), String> {
     if !IsWindow(Some(hwnd)).as_bool() {
-        return Err("folia window no longer exists".to_string());
+        return Err("LumaMusic window no longer exists".to_string());
     }
 
     // The monitor the window is on *before* the re-parent is the target: SetParent preserves the
@@ -308,7 +308,7 @@ pub unsafe fn attach_window(hwnd: HWND) -> Result<(HWND, AttachMode), String> {
 /// Un-parents the window from WorkerW and restores normal styles.
 pub unsafe fn detach_window(hwnd: HWND) -> Result<(), String> {
     if !IsWindow(Some(hwnd)).as_bool() {
-        return Err("folia window no longer exists".to_string());
+        return Err("LumaMusic window no longer exists".to_string());
     }
     SetParent(hwnd, None).map_err(|err| format!("SetParent(NULL) failed: {err}"))?;
     restore_styles(hwnd);

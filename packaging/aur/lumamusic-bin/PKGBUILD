@@ -1,0 +1,48 @@
+pkgname=lumamusic-bin
+pkgver=2.0.0
+pkgrel=1
+pkgdesc="High Performance Bit-Perfect Audio Player"
+arch=('x86_64')
+url="https://github.com/QCJLchina/LumaMusic"
+license=('AGPL')
+depends=(
+  'alsa-lib'
+  'gtk3'
+  'libxss'
+  'nss'
+)
+optdepends=(
+  'xdg-utils: desktop integration helpers'
+)
+provides=('lumamusic')
+conflicts=('lumamusic')
+source=(
+  "https://github.com/QCJLchina/LumaMusic/releases/download/v${pkgver}/lumamusic-${pkgver}-linux-x64.tar.gz"
+  'lumamusic.desktop'
+  'lumamusic.png'
+)
+sha256sums=(
+  'SKIP'
+  'db708abbe801789e41794d8bca80a4655a8c191562c0715e20c87e097cf829d2'
+  '1038fdb8bd45e9672daf2f2528b9d30c7aacba8c199f2f4d86b6c9646eabc7df'
+)
+
+package() {
+  local appdir
+
+  appdir="$(dirname "$(find "${srcdir}" -type f -name 'lumamusic' -perm -u+x | head -n1)")"
+  if [[ -z "${appdir}" ]]; then
+    echo "Could not locate packaged lumamusic executable in extracted archive" >&2
+    return 1
+  fi
+
+  install -dm755 "${pkgdir}/opt/lumamusic"
+  cp -a "${appdir}/." "${pkgdir}/opt/lumamusic/"
+
+  install -dm755 "${pkgdir}/usr/bin"
+  ln -sf "/opt/lumamusic/lumamusic" "${pkgdir}/usr/bin/lumamusic"
+
+  install -Dm644 "${srcdir}/lumamusic.desktop" \
+    "${pkgdir}/usr/share/applications/lumamusic.desktop"
+  install -Dm644 "${srcdir}/lumamusic.png" "${pkgdir}/usr/share/pixmaps/lumamusic.png"
+}

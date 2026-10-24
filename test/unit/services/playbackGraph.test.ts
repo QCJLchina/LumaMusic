@@ -149,4 +149,18 @@ describe('buildPlaybackGraph', () => {
         expect(graph.decksConnected).toBe(false);
         expect(graph.gainNode).toBeDefined();
     });
+
+    it('never routes the analyser straight to the speakers, so muting the gate keeps visuals alive', () => {
+        // The native engine mutes the web path while it owns the output. If that mute sat on the
+        // volume node - or if the analyser bypassed the gate - the visualiser would read zeros and
+        // every lyric animation would freeze exactly when the engine took over.
+        const { graph, edges, analyser, context } = buildWith('flat');
+        const gate = graph.outputGate as unknown as FakeNode;
+        expect(gate).not.toBe(graph.gainNode as unknown as FakeNode);
+        expect(gate).not.toBe(analyser as unknown as FakeNode);
+
+        const fromAnalyser = edges.filter(([from]) => from === analyser as unknown as FakeNode).map(([, to]) => to);
+        expect(fromAnalyser).toEqual([gate]);
+        expect(edges.filter(([from]) => from === gate).map(([, to]) => to)).toEqual([context.destination]);
+    });
 });

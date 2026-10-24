@@ -254,7 +254,7 @@ fn spawn_reattach() {
             let hwnd = HWND(folia as _);
             if !IsWindow(Some(hwnd)).as_bool() {
                 emit(&Event::Error {
-                    message: "folia window was destroyed together with the WorkerW; the main process must rebuild it"
+                    message: "LumaMusic window was destroyed together with the WorkerW; the main process must rebuild it"
                         .to_string(),
                     kind: Some(crate::events::ERR_KIND_WINDOW_DESTROYED),
                 });

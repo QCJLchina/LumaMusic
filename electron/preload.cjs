@@ -391,9 +391,12 @@ contextBridge.exposeInMainWorld('electron', {
         getDevices: () => ipcRenderer.invoke("luma-audio-get-devices"),
         open: (params) => ipcRenderer.invoke("luma-audio-open", params),
         pause: (pauseVal) => ipcRenderer.invoke("luma-audio-pause", pauseVal),
+        fade: (target, seconds) => ipcRenderer.invoke("luma-audio-fade", target, seconds),
+        fadeWait: (target, seconds) => ipcRenderer.invoke("luma-audio-fade-wait", target, seconds),
         seek: (position) => ipcRenderer.invoke("luma-audio-seek", position),
         stop: () => ipcRenderer.invoke("luma-audio-stop"),
         setVolume: (volume) => ipcRenderer.invoke("luma-audio-set-volume", volume),
         getState: () => ipcRenderer.invoke("luma-audio-get-state"),
+        stageLocalFile: (key, data) => ipcRenderer.invoke("luma-audio-stage-local-file", key, data),
     },
 });
