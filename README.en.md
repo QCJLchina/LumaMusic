@@ -1,7 +1,8 @@
 # LumaMusic v2
 
 Bit-Perfect Native Audio & Lyrics Reimagined // Dual-Engine Music Player
-
+Based on folia secondary development
+Due to folia making an exclusive system, the development of this project is now stopped
 [简体中文](README.md) | [English](README.en.md)
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
