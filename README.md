@@ -2,6 +2,7 @@
 
 专注于极致位完美无损音频与绚丽全屏歌词动画的双引擎音乐播放器 // Bit-Perfect Native Audio & Lyrics Reimagined
 基于folia二次开发
+由于folia已做出独占系统，现停止本项目开发
 
 [简体中文](README.md) | [English](README.en.md)
 
