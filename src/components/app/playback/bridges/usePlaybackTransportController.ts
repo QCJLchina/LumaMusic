@@ -8,6 +8,7 @@ import { usePlaybackStore } from '../../../../stores/usePlaybackStore';
 import { currentTime } from '../../../../stores/motionSignals';
 import { markProgrammaticPause, playbackFade, PLAYBACK_FADE_SECONDS, type PlaybackFadeSettleReason } from '../../../../services/playbackFade';
 import { useLumaAudioStore } from '../../../../stores/useLumaAudioStore';
+import { resumeWebGraph } from '../../../../services/webOutputOwnership';
 import { getPlaybackSongKey } from '../../../../utils/appPlaybackGuards';
 import type { OnlineRecovery, OnlineRecoveryOptions } from '../restore/createOnlineRecoveryController';
 import type { OnlineFailure } from '../../../../services/onlineMusic/failure/onlineFailureCase';
@@ -119,14 +120,10 @@ export function usePlaybackTransportController({
         const shouldAutoplay = () => wantsPlayback.current && isSameSource();
 
         setupAudioAnalyzer();
-        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-            try {
-                await audioContextRef.current.resume();
-            } catch (error) {
-                if (!isCurrent()) return;
-                throw error;
-            }
-        }
+        // 引擎接管时这个图表可能被故意挂起着（挂起才真正把设备交还出去），但挂起的图不推进元素
+        // 时钟，直接 play() 会停在半路。这里先让图跑起来，输出门仍是关的，所以不会出声；
+        // 设备交还仍由 webOutputOwnership 的轮询在 deck 动起来之后重新挂起。
+        await resumeWebGraph();
         if (!isCurrent()) return;
 
         syncOutputGain(getTargetPlaybackVolume(), 0);

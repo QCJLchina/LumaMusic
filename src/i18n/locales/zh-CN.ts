@@ -358,6 +358,8 @@ export default {
     "unmarkedPureMusic": "已取消纯音乐标记，下次播放会自动匹配歌词",
     "bestLyricsMatchFailed": "匹配最佳歌词失败",
     "noSongPlaying": "当前没有正在播放的歌曲",
+    "exclusiveDeviceBusy": "设备未能独占：网页这一路的输出仍在占用声卡，已退回共享播放",
+    "engineFailedHandedBack": "原生音频引擎中断，已切回网页播放通路",
     "neteaseApiStartupFailed": "网易云接口启动失败，部分在线功能不可用",
     "neteaseApiStartupFailedDetail": "网易云接口启动失败，部分在线功能不可用：{{reason}}",
     "generatingTheme": "少女祈祷中...",

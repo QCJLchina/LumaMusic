@@ -23,6 +23,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "codemap": "node dev/mcp/ts-code-map/codemap.mjs",
+    "native:spectrum-contract": "node dev/native/genSpectrumContract.mjs",
     "folium:api": "node dev/folium/api-docs.mjs",
     "folium:types": "node dev/folium/types.mjs",
     "folium:new": "node dev/folium/new.mjs",

@@ -68,6 +68,9 @@ build/mac-helper/
 build/mnn/
 build/.mnn-src/
 build/.mnn-build/
+# 原生音频引擎的本地编译产物（native/luma-audio/build-mingw.ps1）：中间目录与临时目录都在这里，
+# 只有 DLL 本身进仓库（electron/resources/audio-bin/win-x64）。
+native/luma-audio/build/
 # The transcode fallback's dev slot: same binary as build/ffmpeg/<os>-<arch>, staged here so
 # `npm run dev:electron` runs the audio-only runtime the release ships instead of system PATH.
 # `ffmpeg-8.1.2/` is the mod exporters' slot and is a full build the developer supplies.
@@ -99,3 +102,7 @@ dist-runtime/
 
 # Local npm cache created by sandboxed installs
 .npm-cache/
+
+# 原生二进制的本地备份（例如替换 LumaAudio.dll 前留下的官方原件）。上游原件可从
+# PROVENANCE.json 记录的 release 归档取回，不占仓库体积。
+*.dll.bak

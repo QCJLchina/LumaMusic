@@ -2,8 +2,10 @@ import { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MutableRefObject, RefObject } from 'react';
 import { useAudioSettingsStore } from '../stores/useAudioSettingsStore';
+import { useLumaAudioStore } from '../stores/useLumaAudioStore';
 import { usePlaybackStore } from '../stores/usePlaybackStore';
 import { setStatusMessage as setStatusMsg } from '../stores/useStatusMessageStore';
+import { isWebOutputReleased } from '../services/webOutputOwnership';
 
 // src/hooks/useAudioOutputDevice.ts
 //
@@ -47,6 +49,14 @@ export const useAudioOutputDevice = ({
             : audioElement;
 
         if (!audioSinkTarget?.setSinkId) {
+            persistAudioOutputDeviceId(targetDeviceId);
+            return true;
+        }
+
+        // A suspended graph is not the sink any more: the native engine owns the output and this
+        // graph was taken off the device on purpose. setSinkId on it would only fail (or pull the
+        // device back), so the choice is remembered and applied again once the engine lets go.
+        if (audioSinkTarget === audioContext && isWebOutputReleased()) {
             persistAudioOutputDeviceId(targetDeviceId);
             return true;
         }
@@ -155,6 +165,17 @@ export const useAudioOutputDevice = ({
     const handleAudioOutputDeviceChange = useCallback(async (deviceId: string) => (
         await applyAudioOutputDevice(deviceId, true)
     ), [applyAudioOutputDevice]);
+
+    // 引擎交还输出后补一次：挂起期间上面的守卫只记住了选择而没有真正 setSinkId，
+    // 不补这一下，同一首歌会落到默认设备上，直到下一首 loadedmetadata 才纠正。
+    useEffect(() => {
+        let wasOwned = useLumaAudioStore.getState().engineOwnsOutput;
+        return useLumaAudioStore.subscribe(state => {
+            const owned = state.engineOwnsOutput;
+            if (wasOwned && !owned) void applyAudioOutputDevice(audioOutputDeviceId, false);
+            wasOwned = owned;
+        });
+    }, [applyAudioOutputDevice, audioOutputDeviceId]);
 
     return { handleAudioOutputDeviceChange };
 };

@@ -6755,6 +6755,9 @@ ipcMain.handle('luma-audio-seek', (_event, position) => lumaAudioHost.seek(posit
 ipcMain.handle('luma-audio-stop', () => lumaAudioHost.stop());
 ipcMain.handle('luma-audio-set-volume', (_event, volume) => lumaAudioHost.setVolume(volume));
 ipcMain.handle('luma-audio-get-state', () => lumaAudioHost.getState());
+// 可视化频谱：引擎从解码 PCM 上算出的一帧（0..255），独占模式下网页那一路不发声，
+// 这是动画唯一还能用的数据源。渲染端在自己的 RAF 里取，主进程不主动推。
+ipcMain.handle('luma-audio-get-spectrum', () => lumaAudioHost.getSpectrum());
 // BASS 只接受真实文件：渲染端把本地 handle、blob:、自定义协议读成字节交进来，
 // 这里落盘后引擎按绝对路径打开。文件名带内容哈希，重播同一首直接命中。
 ipcMain.handle('luma-audio-stage-local-file', async (_event, key, data) => {

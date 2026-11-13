@@ -358,6 +358,8 @@ export default {
     "unmarkedPureMusic": "Instrumental mark removed; lyrics will be matched automatically next time it plays",
     "bestLyricsMatchFailed": "Failed to match best lyrics",
     "noSongPlaying": "No song is playing",
+    "exclusiveDeviceBusy": "Could not take the device exclusively: the web output still holds the sound card, so playback stays shared",
+    "engineFailedHandedBack": "The native audio engine stopped; playback was handed back to the web path",
     "neteaseApiStartupFailed": "NetEase API failed to start. Some online features are unavailable.",
     "neteaseApiStartupFailedDetail": "NetEase API failed to start, so some online features are unavailable: {{reason}}",
     "generatingTheme": "AI is dreaming up a theme...",

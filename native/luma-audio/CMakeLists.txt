@@ -19,7 +19,17 @@ add_executable(LumaDsd native/dsd_worker.cpp
 target_include_directories(LumaDsd PRIVATE native native/compat "${SACD}/src"
     "${SACD}/lib/libdstdec" "${SACD}/lib/libdstdec/decoder" "${SACD}/lib/libdsdpcm")
 target_link_libraries(LumaDsd PRIVATE id3)
+# The spectrum constants have one source of truth in the renderer. Regenerate the header on every
+# native build so an MSVC release cannot silently compile values left over from an earlier edit.
+find_program(NODE_EXECUTABLE NAMES node node.exe REQUIRED)
+get_filename_component(LUMA_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+add_custom_target(spectrum_contract
+    COMMAND "${NODE_EXECUTABLE}" "${LUMA_REPO_ROOT}/dev/native/genSpectrumContract.mjs"
+    WORKING_DIRECTORY "${LUMA_REPO_ROOT}"
+    BYPRODUCTS "${CMAKE_CURRENT_LIST_DIR}/spectrum_contract.h"
+    COMMENT "Synchronizing the shared analyser spectrum contract")
 add_library(LumaAudio SHARED native/engine.cpp)
+add_dependencies(LumaAudio spectrum_contract)
 target_include_directories(LumaAudio PRIVATE native vendor/bass/c vendor/bassasio/c vendor/basswasapi/c vendor/bassmix/c)
 target_link_libraries(LumaAudio PRIVATE
     "${CMAKE_SOURCE_DIR}/vendor/bass/c/x64/bass.lib"

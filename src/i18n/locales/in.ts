@@ -358,6 +358,8 @@ export default {
     "unmarkedPureMusic": "Tanda instrumental dihapus; lirik akan dicocokkan otomatis saat diputar berikutnya",
     "bestLyricsMatchFailed": "Gagal mencocokkan lirik terbaik",
     "noSongPlaying": "Tidak ada lagu yang diputar",
+    "exclusiveDeviceBusy": "Perangkat tidak bisa dipakai eksklusif: keluaran web masih memegang kartu suara, jadi pemutaran tetap bersama",
+    "engineFailedHandedBack": "Mesin audio native berhenti; pemutaran dialihkan kembali ke jalur web",
     "neteaseApiStartupFailed": "API NetEase gagal dijalankan. Beberapa fitur online tidak tersedia.",
     "neteaseApiStartupFailedDetail": "API NetEase gagal dijalankan, sebagian fitur online tidak tersedia: {{reason}}",
     "generatingTheme": "AI sedang membuat tema...",

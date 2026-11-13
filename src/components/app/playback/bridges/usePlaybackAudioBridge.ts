@@ -21,6 +21,15 @@ import { resolveLumaForceRate, useLumaAudioStore } from '../../../../stores/useL
 import { currentTime } from '../../../../stores/motionSignals';
 import { PLAYBACK_FADE_SECONDS } from '../../../../services/playbackFade';
 import { mustWaitForNativeEngine } from './nativeEngineStartGate';
+import {
+    resumeWebGraph,
+    handOutputBackToWeb,
+    registerWebOutputGraph,
+    releaseOutputAfterEngineFailure,
+    silenceWebOutput,
+    superviseWebGraph,
+} from '../../../../services/webOutputOwnership';
+import { ANALYSER_FFT_SIZE, ANALYSER_SMOOTHING } from '../../../../services/analyserContract';
 
 // src/components/app/playback/bridges/usePlaybackAudioBridge.ts
 
@@ -50,6 +59,13 @@ type UsePlaybackAudioBridgeParams = {
 
 /** How often a mod's equalizer change held back for a blend checks whether the blend has ended. */
 const DEFERRED_EQUALIZER_POLL_MS = 250;
+
+/**
+ * How often the engine's status is polled. This one timer drives the engine clock, the duration the
+ * UI shows, and the web-deck supervision that decides whether the output device can stay with the
+ * engine - so its value is also the resolution of the "deck clock stopped" verdict.
+ */
+const ENGINE_STATUS_POLL_MS = 50;
 
 // Bridges audio element setup, autoplay, replay gain, and media caching.
 export function usePlaybackAudioBridge({
@@ -81,9 +97,14 @@ export function usePlaybackAudioBridge({
     const equalizerNodesRef = useRef<BiquadFilterNode[]>([]);
     const effectChainRef = useRef<AudioEffectChain | null>(null);
     const outputGateRef = useRef<GainNode | null>(null);
+
     // The engine's own position and when it was sampled; used to advance the UI clock between
     // status polls instead of letting it stutter by one IPC round trip.
     const engineClockRef = useRef<{ position: number; at: number; sourceRate: number; } | null>(null);
+    /** 引擎失败后的交还只做一次，避免 failed 一直为真时每轮都重做。 */
+    const engineFailureHandledRef = useRef(false);
+    /** 放弃设备释放这件事只提示一次，否则每次卡顿都会再弹一条。 */
+    const releaseFailureNotifiedRef = useRef(false);
     const audioEqualizerSettings = useAudioSettingsStore(state => state.audioEqualizerSettings);
     // What is heard: the listener's own settings with a mod's curve over the gains (Folium 1.7). Worked out
     // here rather than in a selector, which would hand useSyncExternalStore a new object on every read.
@@ -166,8 +187,8 @@ export function usePlaybackAudioBridge({
             audioContextRef.current = ctx;
 
             const analyser = ctx.createAnalyser();
-            analyser.fftSize = 2048;
-            analyser.smoothingTimeConstant = 0.6;
+            analyser.fftSize = ANALYSER_FFT_SIZE;
+            analyser.smoothingTimeConstant = ANALYSER_SMOOTHING;
             analyserRef.current = analyser;
 
             const { gainNode, fadeNode, effectChain, outputGate, decksConnected } = buildPlaybackGraph({
@@ -188,6 +209,13 @@ export function usePlaybackAudioBridge({
             }
             applyReplayGain();
             syncOutputGain(getTargetPlaybackVolume(), 0);
+            // 设备的归属由 webOutputOwnership 决定：先把这张图登记给它，再按当前归属处理。
+            registerWebOutputGraph({ context: ctx, gate: outputGate });
+            // 引擎先接管、图后建是常态（首次播放就是这条路）。新图默认 running，
+            // 这里只关输出门；真正的挂起交给状态轮询，等 deck 真的开始走之后再交还设备。
+            if (useLumaAudioStore.getState().engineOwnsOutput) {
+                silenceWebOutput();
+            }
         } catch (error) {
             console.error('Audio Context Setup Failed:', error);
         }
@@ -299,14 +327,17 @@ export function usePlaybackAudioBridge({
         engineClockRef.current = null;
         // 引擎接管后，网页这一路只用来喂可视化和效果，不能再送到扬声器：
         // 否则共享模式会双份出声，独占模式下两条流还会互相抢设备。
-        // 静音必须落在分析器之后的输出门，分析器才能继续拿到满幅信号。
-        const context = audioContextRef.current;
-        const gate = outputGateRef.current;
-        if (gate && context) {
-            gate.gain.cancelScheduledValues(context.currentTime);
-            gate.gain.setValueAtTime(res.ok ? 0 : 1, context.currentTime);
+        // 静音必须落在分析器之后的输出门，分析器才能继续拿到满幅信号；
+        // 真正把设备交还出去由 webOutputOwnership 的轮询看护完成。
+        if (res.ok) {
+            silenceWebOutput();
+            // 下一首马上要 play()：挂起的图表不推进元素时钟，先让它跑起来。
+            // 输出门仍然关着，所以这一刻网页这一路不会出声。
+            await resumeWebGraph();
+        } else {
+            await handOutputBackToWeb();
+            console.warn('[LumaAudio] native engine open failed:', res.error);
         }
-        if (!res.ok) console.warn('[LumaAudio] native engine open failed:', res.error);
     }, [audioContextRef, audioSrc, currentSong, gainNodeRef, getTargetPlaybackVolume, localSongs, syncOutputGain]);
 
     useEffect(() => {
@@ -317,6 +348,60 @@ export function usePlaybackAudioBridge({
             void window.electron.lumaAudio.setVolume(getTargetPlaybackVolume());
         }
     }, [audioRef, getTargetPlaybackVolume, syncOutputGain]);
+
+    /**
+     * 每轮引擎状态轮询的副作用，从 setInterval 里拆出来：一个状态快照进，几件事各自处理。
+     *
+     * 四件事：失败交还、引擎时钟采样、设备释放看护、时长同步。两个「只做一次」的标志放在
+     * ref 里而不是 effect 闭包里，这样拆成函数后它们的生命周期仍然跟着这次轮询会话。
+     */
+    const handleEngineStatus = useCallback(async (state: Partial<LumaPlaybackState>) => {
+        // 引擎在播放途中失败（拔 DAC、设备重置、解码中断）时，store 里的 engineOwnsOutput
+        // 会变成 false，但输出门仍被钉在 0——网页这一路不出声，用户听到的是彻底无声。
+        // 真正需要解除的是 webOutputOwnership 记着的静音状态，所以交还必须走它。
+        const engineFailed = Boolean(state.failed || state.deviceGone);
+        if (engineFailed && !engineFailureHandledRef.current) {
+            engineFailureHandledRef.current = true;
+            const handedBack = await releaseOutputAfterEngineFailure();
+            // 设置页显示的是 openError。引擎当前一定给得出原因（设备断开时也会兜底成一句
+            // 可读文案），但仍不拿空串覆盖既有值：那会让故障原因凭空消失。
+            const reason = typeof state.error === 'string' ? state.error.trim() : '';
+            if (reason) useLumaAudioStore.setState({ openError: reason });
+            if (handedBack) {
+                console.warn('[LumaAudio] engine failed mid-playback; output handed back to the web path', reason);
+                setStatusMsg({ type: 'error', text: t('status.engineFailedHandedBack') });
+            }
+        } else if (!engineFailed) {
+            engineFailureHandledRef.current = false;
+        }
+
+        if (typeof state.position === 'number' && Number.isFinite(state.position) && state.playing) {
+            // 记录引擎位置与其到达时刻：两次轮询之间由本地时钟继续推进，
+            // 歌词和动画才不会因为 IPC 的 50ms 往返而落后于声音。
+            engineClockRef.current = {
+                position: state.position,
+                at: performance.now(),
+                sourceRate: state.rate ?? 0,
+            };
+            currentTime.set(state.position);
+            // 设备释放与 deck 时钟看护都在 webOutputOwnership 里；这里只负责每轮驱动一次，
+            // 并在它放弃释放时给用户一条提示（否则「独占没生效」只有开发者日志里能看到）。
+            if (superviseWebGraph(audioRef.current, ENGINE_STATUS_POLL_MS) && !releaseFailureNotifiedRef.current) {
+                releaseFailureNotifiedRef.current = true;
+                setStatusMsg({ type: 'info', text: t('status.exclusiveDeviceBusy') });
+            }
+        } else if (state.playing === false) {
+            // Paused or ended: stop extrapolating, and take the engine's final position
+            // so the picture settles where the sound actually stopped.
+            engineClockRef.current = null;
+            if (typeof state.position === 'number' && Number.isFinite(state.position)) {
+                currentTime.set(state.position);
+            }
+        }
+        if (typeof state.duration === 'number' && state.duration > 0) {
+            usePlaybackStore.getState().setDuration(state.duration);
+        }
+    }, [audioRef, setStatusMsg, t]);
 
     useEffect(() => {
         const lumaAudio = typeof window !== "undefined" ? window.electron?.lumaAudio : undefined;
@@ -359,12 +444,8 @@ export function usePlaybackAudioBridge({
                 } else {
                     await window.electron?.lumaAudio?.stop();
                     useLumaAudioStore.setState({ openError: "", engineOwnsOutput: false });
-                    const gate = outputGateRef.current;
-                    const context = audioContextRef.current;
-                    if (gate && context) {
-                        gate.gain.cancelScheduledValues(context.currentTime);
-                        gate.gain.setValueAtTime(1, context.currentTime);
-                    }
+                    // 引擎交还输出：把设备给回网页这一路，否则停掉引擎后整首歌会没有声音。
+                    await handOutputBackToWeb();
                     syncOutputGain(getTargetPlaybackVolume(), 0);
                 }
             } catch (error) {
@@ -388,31 +469,13 @@ export function usePlaybackAudioBridge({
                 const res = await lumaAudio.getState();
                 if (res.ok && res.state) {
                     luma.updatePlaybackState(res.state);
-                    if (typeof res.state.position === "number" && Number.isFinite(res.state.position) && res.state.playing) {
-                        // 记录引擎位置与其到达时刻：两次轮询之间由本地时钟继续推进，
-                        // 歌词和动画才不会因为 IPC 的 50ms 往返而落后于声音。
-                        engineClockRef.current = {
-                            position: res.state.position,
-                            at: performance.now(),
-                            sourceRate: res.state.rate ?? 0,
-                        };
-                        currentTime.set(res.state.position);
-                    } else if (res.state.playing === false) {
-                        // Paused or ended: stop extrapolating, and take the engine's final position
-                        // so the picture settles where the sound actually stopped.
-                        engineClockRef.current = null;
-                        if (typeof res.state.position === "number" && Number.isFinite(res.state.position)) {
-                            currentTime.set(res.state.position);
-                        }
-                    }
-                    if (typeof res.state.duration === "number" && res.state.duration > 0) {
-                        usePlaybackStore.getState().setDuration(res.state.duration);
-                    }
+                    await handleEngineStatus(res.state);
                 }
             } catch {}
-        }, 50);
+        }, ENGINE_STATUS_POLL_MS);
+
         return () => { unsubscribe(); clearInterval(timer); };
-    }, [openNativeEngine]);
+    }, [audioRef, handleEngineStatus, openNativeEngine]);
 
     useEffect(() => {
         // Between status polls the engine keeps playing, so the UI clock has to as well. A short
@@ -559,6 +622,8 @@ export function usePlaybackAudioBridge({
                     playPromise
                         .then(() => {
                             setPlayerState(PlayerState.PLAYING);
+                            // setupAudioAnalyzer suspends the freshly built context itself when the
+                            // engine already owns the output; nothing else to do here.
                             setupAudioAnalyzer();
                         })
                         .catch(error => {

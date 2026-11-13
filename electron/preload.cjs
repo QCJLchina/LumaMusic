@@ -397,6 +397,9 @@ contextBridge.exposeInMainWorld('electron', {
         stop: () => ipcRenderer.invoke("luma-audio-stop"),
         setVolume: (volume) => ipcRenderer.invoke("luma-audio-set-volume", volume),
         getState: () => ipcRenderer.invoke("luma-audio-get-state"),
+        // The visualiser's spectrum while the engine owns the output: { rate, bins } with 1024
+        // byte values already decoded to a Uint8Array, or an empty one when no frame is available.
+        getSpectrum: () => ipcRenderer.invoke("luma-audio-get-spectrum"),
         stageLocalFile: (key, data) => ipcRenderer.invoke("luma-audio-stage-local-file", key, data),
     },
 });

@@ -1,11 +1,14 @@
 #include "common.h"
 #include "audio_math.h"
+// 频谱参数由 src/services/analyserContract.ts 生成，两侧必须用同一份。
+#include "spectrum_contract.h"
 #include "bass.h"
 #include "basswasapi.h"
 #include "bassasio.h"
 #include "bassmix.h"
 #include <filesystem>
 #include <vector>
+#include <array>
 #include <thread>
 #include <atomic>
 #include <mutex>
@@ -25,6 +28,73 @@ static std::string pluginWarning;
 static bool initialized=false;
 static thread_local std::string resultText;
 static std::vector<HPLUGIN> plugins;
+
+// 频谱参数（SPECTRUM_FFT / SPECTRUM_BINS / SPECTRUM_SMOOTHING / SPECTRUM_MIN_DB / SPECTRUM_MAX_DB）
+// 来自 spectrum_contract.h，由 src/services/analyserContract.ts 生成。
+// 两次计算的最小间隔。真正的节拍由窗口长度决定：2048 帧在 44.1k 下约 46ms（~22Hz），
+// 48k 下约 42ms；这里只是下限，防止极低采样率时算得过密。
+static constexpr uint64_t SPECTRUM_INTERVAL_MS=30;
+// DSD 的可视化取样率。DSD 位流没法直接做 FFT：DoP 里每个 24-bit 样本装的是两个 DSD 字节，
+// 原生模式干脆没有浮点样本。所以先做一阶 Sigma-Delta 解调（窗口内 1 的比例就是该时刻的电平），
+// 抽到约 44.1k 再走同一套 FFT。定 44.1k 是为了和 PCM 的 bin 宽一致（44.1k/2048 约 21.5Hz）。
+static constexpr double SPECTRUM_DSD_RATE=44100.0;
+// 解调窗口的上下限，单位是 DSD 位。64 位约 1.45us：更短噪声太大，更长则低频被抹平。
+static constexpr unsigned SPECTRUM_DSD_MIN_BITS=64;
+static constexpr unsigned SPECTRUM_DSD_MAX_BITS=4096;
+
+// 一个字节里 1 的个数。DSD 解调每个字节算一次；位运算版本只有几条指令，
+// 不查表也不引平台 intrinsics，MSVC 与 MinGW 都能编。
+static inline unsigned popcount8(uint8_t v){
+    v=(uint8_t)(v-((v>>1)&0x55u));
+    v=(uint8_t)((v&0x33u)+((v>>2)&0x33u));
+    return (unsigned)((v+(v>>4))&0x0Fu);
+}
+
+// 一帧频谱走 base64：1024 个数用 JSON 传约 4KB，主进程还要解析成数字数组、过一遍结构化克隆；
+// base64 只有 1.4KB，接收端一次解码就是字节。Base64 不含空格，所以代价只有一次字符串拼接。
+static std::string base64Bytes(const uint8_t* data,size_t length){
+    static const char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve((length+2)/3*4);
+    size_t i=0;
+    for(;i+3<=length;i+=3){
+        uint32_t v=((uint32_t)data[i]<<16)|((uint32_t)data[i+1]<<8)|(uint32_t)data[i+2];
+        out.push_back(alphabet[(v>>18)&63]);out.push_back(alphabet[(v>>12)&63]);
+        out.push_back(alphabet[(v>>6)&63]);out.push_back(alphabet[v&63]);
+    }
+    if(i<length){
+        uint32_t v=(uint32_t)data[i]<<16;
+        if(i+1<length)v|=(uint32_t)data[i+1]<<8;
+        out.push_back(alphabet[(v>>18)&63]);out.push_back(alphabet[(v>>12)&63]);
+        out.push_back(i+1<length?alphabet[(v>>6)&63]:'=');out.push_back('=');
+    }
+    return out;
+}
+
+// 迭代式 radix-2 复数 FFT。只在这里用，规模固定 2048，不引第三方库。
+static void spectrumFft(std::vector<float>& re,std::vector<float>& im){    const unsigned n=(unsigned)re.size();
+    for(unsigned i=1,j=0;i<n;++i){
+        unsigned bit=n>>1;
+        for(;j&bit;bit>>=1)j^=bit;
+        j^=bit;
+        if(i<j){std::swap(re[i],re[j]);std::swap(im[i],im[j]);}
+    }
+    for(unsigned len=2;len<=n;len<<=1){
+        double angle=-2.0*3.14159265358979323846/(double)len;
+        double wr=std::cos(angle),wi=std::sin(angle);
+        for(unsigned i=0;i<n;i+=len){
+            double cr=1.0,ci=0.0;
+            for(unsigned k=0;k<len/2;++k){
+                unsigned a=i+k,b=a+len/2;
+                float tr=(float)(re[b]*cr-im[b]*ci);
+                float ti=(float)(re[b]*ci+im[b]*cr);
+                re[b]=re[a]-tr;im[b]=im[a]-ti;
+                re[a]+=tr;im[a]+=ti;
+                double nextCr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=nextCr;
+            }
+        }
+    }
+}
 
 // BASS_WASAPI_INFO.format -> 设备实际位深；float 也按 32-bit 计。
 static int wasapiFormatBits(DWORD format){
@@ -107,6 +177,137 @@ struct Engine {
     // ReplayGain 音量修正（线性倍率）。只乘在 PCM 浮点样本上，
     // 不重采样、不改 DSD 字节流，所以不破坏位完美回放路径。
     float gainLinear=1.f;
+    // 可视化频谱：从解码出来的 PCM 上取样，不碰送往声卡的缓冲，也不在设备回调里算。
+    // 独占模式下网页那一路已经不再送往扬声器，频谱只能从这里来。
+    std::array<float,SPECTRUM_FFT> window{};
+    unsigned windowFill=0;
+    uint64_t lastSpectrumMs=0;
+    // 这一帧频谱对应的样本率：PCM 是输出率，DSD 是解调后的率，前端按它算 bin 宽。
+    uint32_t spectrumInputRate=0;
+    // 最近一帧，0..255，和 AnalyserNode.getByteFrequencyData 同量纲。
+    // 由解码线程写、luma_spectrum 在主线程读，两边不共用 gate，所以这一份单独加锁。
+    std::array<uint8_t,SPECTRUM_BINS> spectrum{};
+    std::mutex spectrumMutex;
+    float smoothed[SPECTRUM_BINS]{};
+    std::atomic<bool> spectrumValid{false};
+    // 这一帧对应的采样率，前端用它算每个 bin 的频宽。
+    std::atomic<uint32_t> spectrumRate{0};
+    // DSD 解调状态：一阶 Sigma-Delta，窗口按位计。位流按「每组 dsdGroupChannels 个字节」交错
+    // （每声道每字节 8 个 DSD 位），各声道严格同步推进，所以一个计数器就够。
+    // 分组用的是源声道数而不是输出声道数：解调读的是位流本来的交错方式。
+    uint32_t dsdWindowBytes=0;
+    uint32_t dsdGroupChannels=0;
+    uint32_t dsdFilled=0;
+    std::vector<uint32_t> dsdChannelOnes;
+
+    /** 推进频谱滑窗；攒满一窗且到时间了就重算一帧。PCM 与 DSD 解调共用。 */
+    void pushSpectrumSample(float sample){
+        window[windowFill++]=sample;
+        if(windowFill<SPECTRUM_FFT)return;
+        windowFill=0;
+        uint64_t now=GetTickCount64();
+        if(now-lastSpectrumMs<SPECTRUM_INTERVAL_MS)return;
+        lastSpectrumMs=now;
+        computeSpectrum();
+    }
+    // 只在 produce() 线程里调用：把刚解出的 float PCM 混成单声道填进滑动窗。
+    void feedSpectrum(const float* samples,size_t frames){
+        if(dsd&&dsdMode!=0)return;
+        if(!channels||!frames)return;
+        spectrumInputRate=rate;
+        for(size_t f=0;f<frames;++f){
+            float sum=0.f;
+            for(unsigned c=0;c<channels;++c)sum+=samples[f*channels+c];
+            pushSpectrumSample(sum/(float)channels);
+        }
+    }
+    /**
+     * DSD 位流解调后再喂频谱。
+     *
+     * 1-bit 噪声整形码流没有能把 FFT 直接吃下去的浮点样本，所以取窗口内 1 的比例：
+     * 比例 2x-1 就是该时刻的模拟电平，这是最省的一阶 Sigma-Delta 解调。窗口长按源位率
+     * 除到约 44.1k 定：DSD64（2.8224M）取 64 位 = 8 字节，DSD128 取 128 位，依次类推。
+     *
+     * 取样点必须在这里、在 push() 与 pack_dop() 之前：只读不改，位完美透传路径不受影响。
+     */
+    void feedDsdSpectrum(const uint8_t* data,size_t length){
+        if(!(dsd&&dsdMode!=0)||!dsdWindowBytes||!dsdGroupChannels||!length)return;
+        const size_t groups=length/dsdGroupChannels;
+        if(!groups)return;
+        spectrumInputRate=(uint32_t)std::llround((double)sourceRate/((double)dsdWindowBytes*8.0));
+        const double total=(double)dsdWindowBytes*8.0;
+        for(size_t g=0;g<groups;++g){
+            const uint8_t* group=data+g*dsdGroupChannels;
+            for(unsigned c=0;c<dsdGroupChannels;++c)dsdChannelOnes[c]+=popcount8(group[c]);
+            if(++dsdFilled<dsdWindowBytes)continue;
+            // 一个窗口满：每声道 1 的比例映射到 [-1,1]，再按声道平均成单声道。
+            float sum=0.f;
+            for(unsigned c=0;c<dsdGroupChannels;++c){
+                sum+=(float)(2.0*(double)dsdChannelOnes[c]/total-1.0);
+                dsdChannelOnes[c]=0;
+            }
+            dsdFilled=0;
+            pushSpectrumSample(sum/(float)dsdGroupChannels);
+        }
+    }
+    /** 按源位率把解调窗口定到约 44.1k；非 DSD 透传时清空状态。 */
+    void setupDsdSpectrum(){
+        dsdWindowBytes=0;dsdGroupChannels=0;dsdFilled=0;dsdChannelOnes.clear();
+        if(!(dsd&&dsdMode!=0)||!sourceRate||!channels||!sourceChannels)return;
+        // 解调必须按源位流的交错单位切字节。两者目前总相等（DSD 透传既不允许共享模式，也不会
+        // downmix），但不相等时宁可一帧都不出，也不要给出一帧错位却看起来「有反应」的频谱。
+        if(sourceChannels!=channels)return;
+        dsdGroupChannels=sourceChannels;
+        dsdChannelOnes.assign(dsdGroupChannels,0);
+        // 每窗口位数取 8 的整数倍，保证正好按字节消费。
+        unsigned bits=(unsigned)std::llround((double)sourceRate/SPECTRUM_DSD_RATE/8.0)*8;
+        if(bits<SPECTRUM_DSD_MIN_BITS)bits=SPECTRUM_DSD_MIN_BITS;
+        if(bits>SPECTRUM_DSD_MAX_BITS)bits=SPECTRUM_DSD_MAX_BITS;
+        dsdWindowBytes=bits/8;
+    }
+    void computeSpectrum(){
+        std::vector<float> re(window.begin(),window.end());
+        std::vector<float> im(SPECTRUM_FFT,0.f);
+        // Blackman 窗，和 AnalyserNode 内部用的窗一致，减少截断造成的频谱泄漏。
+        for(unsigned i=0;i<SPECTRUM_FFT;++i){
+            double phase=2.0*3.14159265358979323846*(double)i/(double)(SPECTRUM_FFT-1);
+            double w=0.42-0.5*std::cos(phase)+0.08*std::cos(2.0*phase);
+            re[i]=(float)(re[i]*w);
+        }
+        spectrumFft(re,im);
+        std::array<uint8_t,SPECTRUM_BINS> frame{};
+        for(unsigned bin=0;bin<SPECTRUM_BINS;++bin){
+            // 幅度转 dBFS 再映射到 0..255，公式与 AnalyserNode 的 getByteFrequencyData 一致。
+            double magnitude=std::sqrt((double)re[bin]*re[bin]+(double)im[bin]*im[bin])/(double)SPECTRUM_FFT;
+            if(magnitude<1e-12)magnitude=1e-12;
+            double db=20.0*std::log10(magnitude);
+            double normalized=(db-SPECTRUM_MIN_DB)/(SPECTRUM_MAX_DB-SPECTRUM_MIN_DB);
+            normalized=std::clamp(normalized,0.0,1.0);
+            float value=(float)normalized*255.f;
+            // 平滑按上一帧的值推进，避免频段跳变。
+            smoothed[bin]=SPECTRUM_SMOOTHING*smoothed[bin]+(1.f-SPECTRUM_SMOOTHING)*value;
+            float out=smoothed[bin];
+            frame[bin]=(uint8_t)(out<0.f?0:out>255.f?255:out);
+        }
+        spectrumRate.store(spectrumInputRate?spectrumInputRate:rate,std::memory_order_relaxed);
+        {
+            std::lock_guard frameLock(spectrumMutex);
+            spectrum=frame;
+        }
+        spectrumValid.store(true,std::memory_order_release);
+    }
+    void resetSpectrum(){
+        windowFill=0;
+        lastSpectrumMs=0;
+        dsdFilled=0;
+        for(uint32_t& ones:dsdChannelOnes)ones=0;
+        for(float& v:smoothed)v=0.f;
+        {
+            std::lock_guard frameLock(spectrumMutex);
+            spectrum.fill(0);
+        }
+        spectrumValid.store(false,std::memory_order_release);
+    }
     // 输出设备被系统移除（拔 USB DAC / 驱动重置），与解码失败区分开以便自动恢复。
     std::atomic<bool> deviceGone{false};
     // 设备实际协商出的位深；0 表示未知或 DSD 透传（那里没有 PCM 位深可言）。
@@ -209,6 +410,9 @@ struct Engine {
             if(dsd&&dsdMode!=0){
                 std::vector<uint8_t> carry;std::vector<float> dop;
                 while(!quit&&nextBlock()){
+                    // 频谱在变成 DoP 浮点/裸位流之前取：这里是真正的 DSD 位流，解调后可读；
+                    // 而 push() 出去的那份（DoP 伪样本或原始字节）对 FFT 没有意义。
+                    feedDsdSpectrum(pending.data(),pending.size());
                     if(dsdMode==2){push(pending.data(),pending.size());continue;}
                     carry.insert(carry.end(),pending.begin(),pending.end());auto frames=carry.size()/(channels*2);
                     dop.resize(frames*channels);pack_dop(carry.data(),dop.data(),frames,channels,dopMarker);push((uint8_t*)dop.data(),dop.size()*4);
@@ -216,7 +420,12 @@ struct Engine {
                 }
             }else{
                 std::vector<uint8_t> data(65536-65536%frameSize());
-                while(!quit){DWORD n=BASS_ChannelGetData(mixer?mixer:source,data.data(),(DWORD)data.size());if(n==(DWORD)-1){if(BASS_ErrorGetCode()!=BASS_ERROR_ENDED)throw std::runtime_error("音频解码失败");break;}if(!n)break;push(data.data(),n);}
+                while(!quit){DWORD n=BASS_ChannelGetData(mixer?mixer:source,data.data(),(DWORD)data.size());if(n==(DWORD)-1){if(BASS_ErrorGetCode()!=BASS_ERROR_ENDED)throw std::runtime_error("音频解码失败");break;}if(!n)break;
+                    // 频谱取在把这段字节交给环形缓冲之前：这里拿到的是解码器刚产出的浮点样本，
+                    // 还没乘音量和淡化，也不会和 pull() 抢同一个解码流。
+                    // DSD 转 PCM 也走这条，此时样本同样是浮点，可以正常取频谱。
+                    feedSpectrum((const float*)data.data(),n/(channels*4));
+                    push(data.data(),n);}
             }
         }catch(const std::exception& ex){if(!quit){failure=ex.what();failed=true;}}
         ended=true;
@@ -313,6 +522,9 @@ struct Engine {
             if(dsd&&dsdMode==1&&(info.format==BASS_WASAPI_FORMAT_8BIT||info.format==BASS_WASAPI_FORMAT_16BIT))throw std::runtime_error("DoP 输出至少需要 24 位设备格式");
             latency=(double)info.buflen/(rate*channels*4);BASS_WASAPI_SetNotify(wasapiNotify,this);
         }
+        // 声道数到这里才最终定下（共享模式会改成设备混音声道，downmix 会降到 2），
+        // 所以 DSD 解调窗口要在这之后、起解码线程之前准备好。
+        setupDsdSpectrum();
         producer=std::thread([this]{produce();});
         auto deadline=GetTickCount64()+15000;
         while(head<rate*frameSize()/(dsd&&dsdMode==2?80:10)&&!ended&&!failed){if(GetTickCount64()>deadline)throw std::runtime_error("音频预缓冲超时");Sleep(2);}
@@ -333,6 +545,7 @@ struct Engine {
         head.store(0);tail.store(0);played.store(0);ended.store(false);underruns.store(0);
         pending.clear();pendingOffset=0;pending.resize(0);
         dopMarker=false;
+        resetSpectrum();
         quit=false;
         offset=target;
         if(dsd){
@@ -390,7 +603,30 @@ API int luma_seek(double position){std::lock_guard lock(gate);try{if(!engine)ret
 // 立刻用新参数重开时会拿到旧会话（表现为切后端/切采样率后仍是旧值）。
 API void luma_stop(){std::lock_guard lock(gate);if(!engine)return;const bool wasWasapi=engine->wasapi,wasAsio=engine->asio;engine.reset();for(int i=0;i<20;++i){bool busy=(wasWasapi&&BASS_WASAPI_IsStarted())||(wasAsio&&BASS_ASIO_IsStarted());if(!busy)break;Sleep(10);}Sleep(30);}
 API void luma_volume(float v){std::lock_guard lock(gate);if(engine)engine->volume=std::clamp(v,0.f,1.f);}
-API const char* luma_state(){std::lock_guard lock(gate);if(!engine){resultText="{}";return resultText.c_str();}auto&e=*engine;bool done=(e.ended&&e.head==e.tail)||e.atLimit();std::ostringstream o;o<<"{\"playing\":"<<(e.playing?"true":"false")<<",\"ended\":"<<(done?"true":"false")<<",\"failed\":"<<(e.failed?"true":"false")<<",\"error\":"<<quote(e.failure)<<",\"position\":"<<e.position()<<",\"duration\":"<<e.span()<<",\"sourceRate\":"<<e.sourceRate<<",\"sourceChannels\":"<<e.sourceChannels<<",\"rate\":"<<e.rate<<",\"channels\":"<<e.channels<<",\"bits\":"<<e.bits<<",\"deviceBits\":"<<e.deviceBits<<",\"dsd\":"<<(e.dsd?"true":"false")<<",\"mode\":"<<e.dsdMode<<",\"backend\":"<<e.backend<<",\"underruns\":"<<e.underruns<<",\"gain\":"<<e.gainLinear<<",\"deviceGone\":"<<(e.deviceGone?"true":"false")<<"}";resultText=o.str();return resultText.c_str();}
+// 可视化频谱：最近一帧 0..255 的 1024 个 bin，和网页 AnalyserNode 同量纲。
+// DSD 透传走的是位流解调（feedDsdSpectrum），所以这里对 PCM 与 DSD 一视同仁。
+//
+// 返回 "<样本率> <1024 字节的 base64>"。没有引擎或还没攒出第一帧时返回空串，
+// 前端据此保持上一帧，不伪造包络。
+API const char* luma_spectrum(){
+    std::lock_guard lock(gate);
+    if(!engine||!engine->spectrumValid.load(std::memory_order_acquire)){
+        resultText.clear();return resultText.c_str();
+    }
+    std::array<uint8_t,SPECTRUM_BINS> frame{};
+    {
+        std::lock_guard frameLock(engine->spectrumMutex);
+        frame=engine->spectrum;
+    }
+    std::ostringstream o;
+    o<<engine->spectrumRate.load(std::memory_order_relaxed)<<' '<<base64Bytes(frame.data(),frame.size());
+    resultText=o.str();return resultText.c_str();
+}
+API const char* luma_state(){std::lock_guard lock(gate);if(!engine){resultText="{}";return resultText.c_str();}auto&e=*engine;
+    // WASAPI/ASIO 的通知回调只置 failed/deviceGone，不写 failure。设备被拔掉或驱动重置时
+    // 必须给出可读原因，否则设置页看不到故障，前端也无法说明为什么退回网页通路。
+    const std::string failureText=e.failure.empty()&&e.failed?"输出设备已断开或音频驱动中断":e.failure;
+    bool done=(e.ended&&e.head==e.tail)||e.atLimit();std::ostringstream o;o<<"{\"playing\":"<<(e.playing?"true":"false")<<",\"ended\":"<<(done?"true":"false")<<",\"failed\":"<<(e.failed?"true":"false")<<",\"error\":"<<quote(failureText)<<",\"position\":"<<e.position()<<",\"duration\":"<<e.span()<<",\"sourceRate\":"<<e.sourceRate<<",\"sourceChannels\":"<<e.sourceChannels<<",\"rate\":"<<e.rate<<",\"channels\":"<<e.channels<<",\"bits\":"<<e.bits<<",\"deviceBits\":"<<e.deviceBits<<",\"dsd\":"<<(e.dsd?"true":"false")<<",\"mode\":"<<e.dsdMode<<",\"backend\":"<<e.backend<<",\"underruns\":"<<e.underruns<<",\"gain\":"<<e.gainLinear<<",\"deviceGone\":"<<(e.deviceGone?"true":"false")<<"}";resultText=o.str();return resultText.c_str();}
 API void luma_shutdown(){std::lock_guard lock(gate);engine.reset();for(auto p:plugins)BASS_PluginFree(p);plugins.clear();BASS_Free();initialized=false;}
 // 测试入口：位深映射是纯函数，设备不在场也要能回归。
 API int luma_format_bits(int api,DWORD format){return api==0?wasapiFormatBits(format):asioFormatBits(format);}

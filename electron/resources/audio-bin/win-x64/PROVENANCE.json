@@ -1,5 +1,5 @@
 {
   "source": "https://github.com/QCJLchina/LumaMusic/releases/tag/v1.0.2",
   "archive_sha256": "806ce51037ac6da6e5d15116ff7820f8ff1608a570b7df6c978506b3672be8d8",
-  "note": "Unmodified official native release binaries; MSVC unavailable on this machine."
+  "note": "Every binary here is the unmodified official native release except LumaAudio.dll, which is built from native/luma-audio/engine.cpp to add luma_spectrum() for the visualiser. The pristine upstream DLL is not committed; take it from the release archive above if you need to compare. Rebuild with native/luma-audio/build-mingw.ps1 -Deploy, which pins the MinGW-w64 g++ 13.2.0 flags (-std=c++20 -O2 -shared -static); that toolchain is used because MSVC is unavailable on the build machine, so a release build on a machine with MSVC (native/luma-audio/CMakeLists.txt) should be produced and diffed against this one before shipping."
 }

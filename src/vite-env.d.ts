@@ -79,6 +79,17 @@ declare global {
     stop: () => Promise<{ ok: boolean; error?: string }>;
     setVolume: (volume: number) => Promise<{ ok: boolean; error?: string }>;
     getState: () => Promise<{ ok: boolean; state: Partial<LumaPlaybackState>; error?: string }>;
+    /**
+     * The visualiser's spectrum, taken from the engine's decoded audio (not the web deck).
+     *
+     * 1024 bins of 0..255, the same scale and count as `AnalyserNode.getByteFrequencyData` with
+     * `fftSize` 2048, plus the sample rate the frame was computed at - the output rate for PCM, the
+     * demodulated rate for DSD - so a bin index can be turned into Hz. DSD passthrough is included:
+     * the engine demodulates the 1-bit stream first. `bins` is empty whenever no frame is available
+     * yet (nothing playing, the engine is closed, or the DLL predates the export); callers keep
+     * their last bands.
+     */
+    getSpectrum: () => Promise<{ ok: boolean; rate: number; bins: Uint8Array<ArrayBuffer>; error?: string }>;
     /** Writes renderer-owned local audio bytes to a temp file BASS can open; returns its absolute path. */
     stageLocalFile: (key: string, data: ArrayBuffer | Uint8Array) => Promise<{ ok: boolean; path?: string; error?: string }>;
   }

@@ -15,6 +15,8 @@ import {
     lyricCurrentTime,
 } from '../../../../stores/motionSignals';
 import { getTransitionHandoffProgress } from '../../../../services/automix/transitionCue';
+import { useLumaAudioStore } from '../../../../stores/useLumaAudioStore';
+import { analyserBinHz } from '../../../../services/analyserContract';
 import { omni } from '../../../../services/onlineMusic/omni';
 import { tickBeatFx } from '../../../../services/beatFx/beatFxLive';
 import { useBeatFxTrack } from '../../../../hooks/useBeatFxTrack';
@@ -29,6 +31,12 @@ import { isBackgroundLyricHeld, setHeldLyricTime, useBackgroundLyricHoldStore } 
  * where frames stop.
  */
 const HELD_TICK_MS = 250;
+
+/**
+ * How often the frame loop asks the main process for the engine's spectrum while the native engine
+ * owns the output. The engine recomputes its own frame at about 30 Hz; asking faster only adds IPC.
+ */
+const ENGINE_SPECTRUM_POLL_MS = 30;
 
 type UsePlaybackVisualizerBridgeParams = {
 
@@ -218,12 +226,22 @@ export function usePlaybackVisualizerBridge({
         };
     }, [audioRef, getDisplayElement, lyricClipStartSec]);
 
+    // The engine's own spectrum, while it owns the output. Fetched from the main process at its own
+    // ~30 Hz pace and read by the frame loop, because the web analyser is not downstream of the sound
+    // in that mode - and asking per frame would put an IPC round trip in the animation path.
+    const engineSpectrumRef = useRef<{ rate: number; bins: Uint8Array<ArrayBuffer> } | null>(null);
+    const engineSpectrumPendingRef = useRef(false);
+    const engineSpectrumAskedAtRef = useRef(0);
+
     const updateLoop = useCallback(() => {
         // 后台节流 holds the lyric animation while the window is minimised or hidden: the clocks below
         // keep running, while the lyric read-head, the line and the audio bands stay where they are
         // until the window is back on screen (the pass that lets go catches them up).
         const backgroundHold = isBackgroundLyricHeld();
         setHeldLyricTime(null);
+        // 独占/ASIO 下声音来自原生引擎，网页这一路的分析器没有信号：频段改从引擎的解码流取，
+        // 时钟也只认引擎那一条（见 usePlaybackAudioBridge 的引擎时钟）。
+        const engineOwnsOutput = useLumaAudioStore.getState().engineOwnsOutput;
         const showLyricTime = (seconds: number) => {
             if (backgroundHold) setHeldLyricTime(seconds);
             else lyricCurrentTime.set(seconds);
@@ -243,30 +261,25 @@ export function usePlaybackVisualizerBridge({
         // a visible stutter at exactly the moment meant to be seamless.
         const hasAudibleSignal = isActuallyPlaying || isTransitionAudible();
 
-        if (backgroundHold) {
-            // The bands keep their last values: nothing draws from them while held.
-        } else if (hasAudibleSignal && analyserRef.current) {
-            const bufferLength = analyserRef.current.frequencyBinCount;
-            const dataArray = new Uint8Array(bufferLength);
-            analyserRef.current.getByteFrequencyData(dataArray);
-            audioBands.spectrum?.set(dataArray);
+        /** One band's mean level, from a spectrum whose bin width is `binHz` rather than 21.5. */
+        const energyBetween = (data: Uint8Array<ArrayBuffer>, binHz: number, minHz: number, maxHz: number): number => {
+            const start = Math.max(0, Math.floor(minHz / binHz));
+            const end = Math.min(data.length - 1, Math.floor(maxHz / binHz));
+            let sum = 0;
+            for (let index = start; index <= end; index += 1) sum += data[index];
+            const count = end - start + 1;
+            return count > 0 ? sum / count : 0;
+        };
 
-            const getEnergy = (minHz: number, maxHz: number): number => {
-                const start = Math.floor(minHz / 21.5);
-                const end = Math.floor(maxHz / 21.5);
-                let sum = 0;
-                for (let index = start; index <= end; index += 1) {
-                    sum += dataArray[index];
-                }
-                const count = end - start + 1;
-                return count > 0 ? sum / count : 0;
-            };
+        /** Writes the five bands and the overall power from whatever spectrum was just read. */
+        const writeBands = (data: Uint8Array<ArrayBuffer>, binHz: number) => {
+            audioBands.spectrum?.set(data);
 
-            const bass = getEnergy(20, 150);
-            const lowMid = getEnergy(150, 400);
-            const mid = getEnergy(400, 1200);
-            const vocal = getEnergy(1000, 3500);
-            const treble = getEnergy(3500, 12000);
+            const bass = energyBetween(data, binHz, 20, 150);
+            const lowMid = energyBetween(data, binHz, 150, 400);
+            const mid = energyBetween(data, binHz, 400, 1200);
+            const vocal = energyBetween(data, binHz, 1000, 3500);
+            const treble = energyBetween(data, binHz, 3500, 12000);
 
             const process = (value: number, boost = 2) => {
                 const normalized = value / 255;
@@ -279,6 +292,47 @@ export function usePlaybackVisualizerBridge({
             audioBands.mid.set(process(mid, 2));
             audioBands.vocal.set(process(vocal, 1.5));
             audioBands.treble.set(process(treble, 2));
+        };
+
+        if (backgroundHold) {
+            // The bands keep their last values: nothing draws from them while held.
+        } else if (engineOwnsOutput && useLumaAudioStore.getState().isLumaPlaying) {
+            // Ask the main process for the latest frame, but never with two requests in flight and
+            // never more often than the engine computes them.
+            const now = performance.now();
+            const lumaAudio = typeof window !== 'undefined' ? window.electron?.lumaAudio : undefined;
+            if (lumaAudio && !engineSpectrumPendingRef.current && now - engineSpectrumAskedAtRef.current >= ENGINE_SPECTRUM_POLL_MS) {
+                engineSpectrumPendingRef.current = true;
+                engineSpectrumAskedAtRef.current = now;
+                void lumaAudio.getSpectrum()
+                    .then(res => {
+                        // An empty frame means no audio to analyse (nothing playing yet, a closed
+                        // engine, or a DLL without the export). Keep the last bands then: a fake
+                        // envelope would be worse than a still one, and the visualizer's own
+                        // smoothing covers the gap.
+                        const bins = res?.ok && res.bins instanceof Uint8Array && res.bins.length > 0
+                            ? res.bins
+                            : null;
+                        if (bins) {
+                            engineSpectrumRef.current = { rate: res.rate, bins };
+                        }
+                    })
+                    .catch(() => { /* A dropped frame only means one stale spectrum; next tick retries. */ })
+                    .finally(() => { engineSpectrumPendingRef.current = false; });
+            }
+            const frame = engineSpectrumRef.current;
+            if (frame && frame.bins.length > 1 && frame.rate > 0) {
+                // A fresh copy per frame, like the analyser path below: `spectrum` is a MotionValue
+                // and consumers rely on a new array being published each frame.
+                writeBands(frame.bins.slice(), analyserBinHz(frame.rate, frame.bins.length));
+            }
+        } else if (!engineOwnsOutput && hasAudibleSignal && analyserRef.current) {
+            const bufferLength = analyserRef.current.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            analyserRef.current.getByteFrequencyData(dataArray);
+            // 一个 bin 覆盖多少 Hz 由 analyserContract 统一算，不再写死 21.5 / 2048：
+            // 那个常数只在 44.1k + fftSize 2048 下成立。
+            writeBands(dataArray, analyserBinHz(analyserRef.current.context.sampleRate, dataArray.length));
         } else {
             const time = Date.now() / 2000;
             const breath = (Math.sin(time) + 1) * 20;
@@ -291,7 +345,20 @@ export function usePlaybackVisualizerBridge({
             audioBands.spectrum?.set(new Uint8Array(0));
         }
 
-        if (isActuallyPlaying && audioElement) {
+        if (engineOwnsOutput) {
+            // 引擎接管时进度属于引擎：`audioElement.currentTime` 是网页那一份从 0 开始的解码位置，
+            // 引擎从落盘文件读，两者起点和推进都不同。currentTime 已经由音频桥按引擎时钟写入，
+            // 这里只读不写，歌词时间在它之上加偏移，否则每帧把动画拽回网页元素的位置。
+            const enginePlaying = useLumaAudioStore.getState().isLumaPlaying;
+            const time = currentTime.get();
+            if (enginePlaying && !backgroundHold) {
+                const effectiveLyricTime = time + lyricClipStartSec(audioElement) - displayOffsetMsRef.current / 1000;
+                showLyricTime(effectiveLyricTime);
+                if (lyrics) {
+                    showLine(findLatestActiveLineIndex(lyrics.lines, effectiveLyricTime));
+                }
+            }
+        } else if (isActuallyPlaying && audioElement) {
             const time = audioElement.currentTime;
             currentTime.set(time);
 

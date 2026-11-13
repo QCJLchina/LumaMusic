@@ -58,6 +58,19 @@ jobs:
       - name: Run typecheck
         run: npm run typecheck
 
+      # 频谱契约的 C++ 侧由 TS 生成（dev/native/genSpectrumContract.mjs）。这里只重新生成再比对：
+      # 有人改了 analyserContract.ts 却没提交生成结果时，DLL 会带着旧频段定义编出来，而构建
+      # 本身不会失败。生成器只需要 Node 内置模块，所以放在装依赖之前也能跑。
+      # 用 git status 而不是 git diff：后者看不见未跟踪文件，而「生成物被漏提交」正是要抓的情况。
+      - name: Check the spectrum contract is up to date
+        run: |
+          npm run native:spectrum-contract
+          if [ -n "$(git status --porcelain -- native/luma-audio/spectrum_contract.h)" ]; then
+            echo "spectrum_contract.h is out of date or not committed. Run: npm run native:spectrum-contract"
+            git --no-pager diff -- native/luma-audio/spectrum_contract.h
+            exit 1
+          fi
+
       - name: Run unit tests
         run: npm run test:unit
 

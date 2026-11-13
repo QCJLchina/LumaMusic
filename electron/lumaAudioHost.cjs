@@ -50,12 +50,22 @@ function ensureLoaded() {
     const dllPath = path.join(binDir, 'LumaAudio.dll');
     const lib = koffi.load(dllPath);
 
+    // A missing symbol throws here, and `bound` is shared by every call below - so binding an
+    // optional export unconditionally would let one older DLL disable the whole engine rather
+    // than just the feature that needs it. Optional exports degrade to null instead.
+    const optional = (signature) => {
+        try { return lib.func(signature); } catch { return null; }
+    };
+
     bound = {
         binDir,
         luma_init: lib.func('int luma_init(const char16_t* directory)'),
         luma_devices: lib.func('const char* luma_devices()'),
         luma_error: lib.func('const char* luma_error()'),
         luma_state: lib.func('const char* luma_state()'),
+        // Added for the visualiser. A DLL built before it exists ships without it; getSpectrum()
+        // then reports "no frame" and the visualiser keeps whatever the web analyser gives it.
+        luma_spectrum: optional('const char* luma_spectrum()'),
         luma_open: lib.func('int luma_open(const char16_t* file, int track, int backend, int device, int mode, int pcmRate, int forceRate, int downmix, const int* map, float volume, double position, double limit, float gainLinear, double cueStart, double fadeIn)'),
         luma_pause: lib.func('int luma_pause(int pause)'),
         luma_fade: lib.func('int luma_fade(float target, double seconds)'),
@@ -81,6 +91,8 @@ const STREAM_DIR = path.join(os.tmpdir(), 'lumamusic-luma-stream');
 const STREAM_CACHE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 // 正在写的下载：同一地址的并发请求共用一次下载，不同地址互不影响。
 const pendingStreams = new Map();
+// 没有频谱帧时返回的共享空值，避免每帧分配一个新的空数组。
+const EMPTY_BINS = new Uint8Array(0);
 
 /** Records a staged file so the LRU sweep knows it is in use. */
 function touchStagedFile(file) {
@@ -304,6 +316,33 @@ const lumaAudioHost = {
             return { ok: true, state };
         } catch (error) {
             return { ok: false, error: error.message, state: {} };
+        }
+    },
+
+    /**
+     * The visualiser's spectrum, taken from the engine's decoded audio.
+     *
+     * Returns `{ rate, bins }` where bins is the engine's 1024 byte values, already decoded from the
+     * wire form the DLL uses ("<rate> <base64>") so the renderer never sees an array of numbers.
+     * An empty `bins` means no frame is available (nothing playing yet, the engine is closed, or the
+     * DLL predates luma_spectrum) and callers keep the last one.
+     */
+    getSpectrum() {
+        try {
+            const api = ensureLoaded();
+            if (!api.luma_spectrum) return { ok: true, rate: 0, bins: EMPTY_BINS };
+            const raw = api.luma_spectrum();
+            if (!raw) return { ok: true, rate: 0, bins: EMPTY_BINS };
+            // Base64 never contains a space, so the first one separates the two fields.
+            const split = raw.indexOf(' ');
+            if (split <= 0) return { ok: true, rate: 0, bins: EMPTY_BINS };
+            return {
+                ok: true,
+                rate: Number(raw.slice(0, split)) || 0,
+                bins: new Uint8Array(Buffer.from(raw.slice(split + 1), 'base64')),
+            };
+        } catch (error) {
+            return { ok: false, error: error.message, rate: 0, bins: EMPTY_BINS };
         }
     },
 
